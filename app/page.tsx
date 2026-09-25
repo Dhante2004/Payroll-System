@@ -863,12 +863,12 @@ export default function Home() {
         {/* Left Panel */}
         <div className="flex-[1.2] relative bg-[url('/mit-school.jpg')] bg-cover bg-center p-14 flex flex-col justify-between text-white">
           <div className="absolute inset-0 bg-gradient-to-br from-[#0a372b]/70 to-[#04231b]/80 z-10" />
-          <div className="relative z-20 h-full flex flex-col justify-between">
-            <div className="flex flex-col items-center gap-4 text-center">
+          <div className="relative z-20 h-full flex flex-col">
+            <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
               <Image src="/mit-seal.png" alt="Mahardika Institute of Technology seal" width={220} height={220} className="h-[220px] w-[220px] object-contain drop-shadow-xl rounded-full" referrerPolicy="no-referrer" />
               <div className="w-full max-w-2xl">
                 <h1 className="font-serif text-2xl font-bold leading-tight tracking-tight text-white">Mahardika Institute of Technology, Inc.</h1>
-                <p className="text-lg text-[#a3d9cb] uppercase tracking-widest font-semibold leading-relaxed mt-3">Web-Based Employee Payroll Management System</p>
+                <p className="text-xl text-[#a3d9cb] uppercase tracking-widest font-semibold leading-relaxed mt-3">Web-Based Employee Payroll Management System</p>
               </div>
             </div>
 
