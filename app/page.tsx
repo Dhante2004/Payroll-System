@@ -24,6 +24,7 @@ function useIsMounted() {
 }
 
 import Image from 'next/image';
+import ExcelJS from 'exceljs';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Users,
@@ -808,17 +809,61 @@ export default function Home() {
     }
   };
 
-  const exportExcelCSV = () => {
-    let csv = "ID,Employee Name,Department,Basic Salary,Allowance,Gross Pay,Total Deductions,Net Pay,Date\n";
-    payrollRecords.forEach(r => {
-      csv += `${r.employee_id},"${r.name}","${r.department}",${r.basic_salary},${r.allowance},${r.gross_pay},${r.total_deduction},${r.net_pay},${r.payroll_date}\n`;
+  const exportPayrollExcel = () => {
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Mahardika Institute of Technology';
+    const worksheet = workbook.addWorksheet('Payroll Summary');
+    worksheet.columns = [
+      { header: 'Employee ID', key: 'employeeId', width: 18 },
+      { header: 'Employee Name', key: 'name', width: 30 },
+      { header: 'Department', key: 'department', width: 38 },
+      { header: 'Basic Salary', key: 'basicSalary', width: 17 },
+      { header: 'Allowance', key: 'allowance', width: 15 },
+      { header: 'Gross Pay', key: 'grossPay', width: 17 },
+      { header: 'Total Deductions', key: 'deductions', width: 20 },
+      { header: 'Net Pay', key: 'netPay', width: 17 },
+      { header: 'Payroll Date', key: 'payrollDate', width: 17 }
+    ];
+    worksheet.autoFilter = 'A1:I1';
+    worksheet.getRow(1).height = 26;
+    worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F5E4A' } };
+    worksheet.getRow(1).alignment = { vertical: 'middle', wrapText: true };
+
+    displayedPayrollRecords.forEach(record => {
+      const row = worksheet.addRow({
+        employeeId: record.employee_id,
+        name: record.name,
+        department: record.department,
+        basicSalary: Number(record.basic_salary),
+        allowance: Number(record.allowance),
+        grossPay: Number(record.gross_pay),
+        deductions: Number(record.total_deduction),
+        netPay: Number(record.net_pay),
+        payrollDate: record.payroll_date
+      });
+      row.height = 21;
+      row.alignment = { vertical: 'middle' };
+      row.eachCell(cell => {
+        cell.border = {
+          bottom: { style: 'thin', color: { argb: 'FFE2EFE9' } }
+        };
+      });
+      [4, 5, 6, 7, 8].forEach(columnNumber => {
+        row.getCell(columnNumber).numFmt = '"₱"#,##0.00';
+        row.getCell(columnNumber).alignment = { horizontal: 'right', vertical: 'middle' };
+      });
     });
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `MIT_Payroll_Summary_${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
+
+    void workbook.xlsx.writeBuffer().then(buffer => {
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `MIT_Payroll_Summary_${new Date().toISOString().split('T')[0]}.xlsx`;
+      link.click();
+      window.URL.revokeObjectURL(url);
+    });
   };
 
   // Stats calculations
@@ -1956,7 +2001,7 @@ export default function Home() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -15 }}
                 transition={{ duration: 0.2 }}
-                className="bg-white rounded-[28px] border border-[#dcf1ec] p-8 shadow-sm space-y-6"
+                className="report-print-area bg-white rounded-[28px] border border-[#dcf1ec] p-8 shadow-sm space-y-6"
               >
                 <div className="flex items-center justify-between border-b border-[#e2efe9] pb-4">
                   <div>
@@ -1964,7 +2009,7 @@ export default function Home() {
                     <p className="text-xs text-[#2baf9a] font-medium mt-0.5">Institutional payroll expense totals, statutory contributions, and net disbursements</p>
                   </div>
 
-                  <div className="flex gap-3">
+                  <div className="flex gap-3 no-print">
                     <motion.button
                       whileHover={{ scale: 1.03 }}
                       whileTap={{ scale: 0.97 }}
@@ -1977,7 +2022,7 @@ export default function Home() {
                     <motion.button
                       whileHover={{ scale: 1.03 }}
                       whileTap={{ scale: 0.97 }}
-                      onClick={exportExcelCSV}
+                      onClick={exportPayrollExcel}
                       className="px-6 py-2.5 bg-[#237a6b] text-white font-bold text-xs rounded-full flex items-center gap-2 hover:bg-[#1f5e4a] transition shadow-sm cursor-pointer"
                     >
                       <FileSpreadsheet className="w-4 h-4" />
