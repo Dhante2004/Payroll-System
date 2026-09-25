@@ -50,6 +50,9 @@
     box-shadow: none !important;
     border: 0 !important;
   }
+  .payslip-print-area.payslip-copies-1 {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .payslip-modal {
     width: 100% !important;
     max-width: none !important;
@@ -97,11 +100,11 @@
   .payslip-copy .mt-4 {
     margin-top: 1mm !important;
   }
-  .payslip-copy:first-child {
+  .payslip-copies-2 .payslip-copy:first-child {
     border-right: 1px dashed #6b7280;
     padding-right: 4mm !important;
   }
-  .payslip-copy:nth-child(2) {
+  .payslip-copies-2 .payslip-copy:nth-child(2) {
     padding-left: 4mm !important;
   }
   .print-logo,

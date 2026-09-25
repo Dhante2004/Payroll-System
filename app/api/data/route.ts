@@ -17,7 +17,9 @@ export async function GET() {
   const employeesCollection = database.collection('employees');
   const payrollCollection = database.collection('payrollRecords');
   const employeeFilter = session.role === 'admin' ? {} : { userId: session.userId };
-  const payrollFilter = session.role === 'admin' ? {} : { employeeUid: session.userId };
+  const payrollFilter = session.role === 'admin'
+    ? {}
+    : { $or: [{ employeeUid: session.userId }, { employee_id: session.employeeId }] };
   const [employees, payrollRecords] = await Promise.all([
     employeesCollection.find(employeeFilter).sort({ name: 1 }).toArray(),
     payrollCollection.find(payrollFilter).sort({ payroll_date: -1 }).toArray()
@@ -59,9 +61,31 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   const session = await requireSession();
-  if (!session || session.role !== 'admin') return NextResponse.json({ message: 'Administrator access required.' }, { status: 403 });
+  if (!session) return NextResponse.json({ message: 'Authentication required.' }, { status: 401 });
 
   const body = await request.json();
+  if (body.action === 'profile') {
+    const profile = body.profile || {};
+    const name = String(profile.name || '').trim();
+    const position = String(profile.position || '').trim();
+    const department = String(profile.department || '').trim();
+    const profilePic = String(profile.profile_pic || '');
+    if (!name || !position || !department) {
+      return NextResponse.json({ message: 'Name, position, and department are required.' }, { status: 400 });
+    }
+    if (profilePic && (!profilePic.startsWith('data:image/') || profilePic.length > 2_000_000)) {
+      return NextResponse.json({ message: 'Profile pictures must be compressed image files under 1.5 MB.' }, { status: 400 });
+    }
+    const updates: Record<string, string> = { name, position, department };
+    if (profilePic) updates.profile_pic = profilePic;
+    const database = await getDatabase();
+    await database.collection('employees').updateOne({ userId: session.userId }, { $set: updates });
+    const employee = await database.collection('employees').findOne({ userId: session.userId });
+    return NextResponse.json({ employee: employee ? toEmployee(employee) : null });
+  }
+
+  if (session.role !== 'admin') return NextResponse.json({ message: 'Administrator access required.' }, { status: 403 });
+
   const id = String(body.mongoId || '');
   if (!ObjectId.isValid(id)) return NextResponse.json({ message: 'Invalid employee document ID.' }, { status: 400 });
   if (body.action === 'approve-employee') {

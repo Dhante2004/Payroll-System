@@ -36,9 +36,36 @@ function hashOtp(code: string) {
 }
 
 async function sendOtpEmail(email: string, code: string) {
+  const agentMailApiKey = process.env.AGENTMAIL_API_KEY;
+  const agentMailInboxId = process.env.AGENTMAIL_INBOX_ID;
+  if (agentMailApiKey && agentMailInboxId) {
+    const response = await fetch(`https://api.agentmail.to/v0/inboxes/${encodeURIComponent(agentMailInboxId)}/messages/send`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${agentMailApiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        to: email,
+        subject: 'Your MIT payroll verification code',
+        text: `Your verification code is ${code}. It expires in 10 minutes. If you did not request this code, you can ignore this email.`
+      })
+    });
+    if (!response.ok) {
+      const details = await response.text();
+      throw new Error(`AgentMail rejected the OTP email (${response.status}). ${details.slice(0, 300)}`);
+    }
+    return true;
+  }
+
   const apiKey = process.env.RESEND_API_KEY;
   const from = process.env.OTP_FROM_EMAIL || 'onboarding@resend.dev';
-  if (!apiKey) throw new Error('Email OTP is not configured. Add RESEND_API_KEY to the server environment.');
+  if (!apiKey) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('Email OTP is not configured. Add RESEND_API_KEY to the server environment.');
+    }
+    return false;
+  }
 
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -57,6 +84,7 @@ async function sendOtpEmail(email: string, code: string) {
   if (!response.ok) {
     throw new Error('The verification email could not be sent. Check the email service configuration.');
   }
+  return true;
 }
 
 export async function GET() {
@@ -99,6 +127,64 @@ export async function POST(request: NextRequest) {
     return response;
   }
 
+  if (action === 'forgot-password') {
+    const email = String(body.email || '').trim().toLowerCase();
+    const employee = email ? await employees.findOne({ email }) : null;
+    let devCode: string | undefined;
+    if (employee) {
+      const otp = String(randomInt(100000, 1000000));
+      const passwordResets = database.collection('passwordResets');
+      await passwordResets.deleteMany({ userId: String(employee.userId) });
+      try {
+        const deliveredByEmail = await sendOtpEmail(String(employee.email), otp);
+        if (!deliveredByEmail) devCode = otp;
+      } catch (error) {
+        return NextResponse.json({
+          status: 'error',
+          message: error instanceof Error ? error.message : 'Unable to send the password reset code.'
+        }, { status: 503 });
+      }
+      await passwordResets.insertOne({
+        userId: String(employee.userId),
+        email: String(employee.email),
+        otpHash: hashOtp(otp),
+        otpExpiresAt: new Date(Date.now() + otpLifetimeMs),
+        otpAttempts: 0,
+        createdAt: new Date()
+      });
+    }
+    return NextResponse.json({
+      status: 'pending',
+      email,
+      ...(devCode ? { devCode, testNotice: 'Email delivery is disabled locally. Use the development code shown here.' } : {})
+    });
+  }
+
+  if (action === 'reset-password') {
+    const email = String(body.email || '').trim().toLowerCase();
+    const code = String(body.code || '').trim();
+    const newPassword = String(body.newPassword || '');
+    if (!email || !/^\d{6}$/.test(code) || newPassword.length < 6) {
+      return NextResponse.json({ status: 'error', message: 'Enter the 6-digit code and a password of at least 6 characters.' }, { status: 400 });
+    }
+    const employee = await employees.findOne({ email });
+    const passwordResets = database.collection('passwordResets');
+    const reset = employee ? await passwordResets.findOne({ userId: String(employee.userId), email }) : null;
+    if (!employee || !reset || !(reset.otpExpiresAt instanceof Date) || reset.otpExpiresAt.getTime() < Date.now()) {
+      return NextResponse.json({ status: 'error', message: 'That code has expired. Please request a new one.' }, { status: 400 });
+    }
+    if (Number(reset.otpAttempts || 0) >= 5) {
+      return NextResponse.json({ status: 'error', message: 'Too many incorrect attempts. Please request a new code.' }, { status: 429 });
+    }
+    if (reset.otpHash !== hashOtp(code)) {
+      await passwordResets.updateOne({ _id: reset._id }, { $inc: { otpAttempts: 1 } });
+      return NextResponse.json({ status: 'error', message: 'That verification code is incorrect.' }, { status: 400 });
+    }
+    await employees.updateOne({ _id: employee._id }, { $set: { passwordHash: await bcrypt.hash(newPassword, 12) } });
+    await passwordResets.deleteOne({ _id: reset._id });
+    return NextResponse.json({ status: 'success' });
+  }
+
   if (action === 'login') {
     const login = String(body.login || body.email || '').trim();
     const password = String(body.password || '');
@@ -131,8 +217,10 @@ export async function POST(request: NextRequest) {
     const otp = String(randomInt(100000, 1000000));
     const loginOtps = database.collection('loginOtps');
     await loginOtps.deleteMany({ userId: String(employee.userId) });
+    let devCode: string | undefined;
     try {
-      await sendOtpEmail(String(employee.email), otp);
+      const deliveredByEmail = await sendOtpEmail(String(employee.email), otp);
+      if (!deliveredByEmail) devCode = otp;
     } catch (error) {
       return NextResponse.json({
         status: 'error',
@@ -147,7 +235,11 @@ export async function POST(request: NextRequest) {
       otpAttempts: 0,
       createdAt: new Date()
     });
-    return NextResponse.json({ status: 'pending-login', email: String(employee.email) });
+    return NextResponse.json({
+      status: 'pending-login',
+      email: String(employee.email),
+      ...(devCode ? { devCode, testNotice: 'Email delivery is disabled locally. Use the development code shown here.' } : {})
+    });
   }
 
   if (action === 'verify-login-otp') {
@@ -198,6 +290,7 @@ export async function POST(request: NextRequest) {
 
     const otp = String(randomInt(100000, 1000000));
     const pendingRegistrations = database.collection('pendingRegistrations');
+    let devCode: string | undefined;
     const pendingRegistration = {
       userId: randomUUID(),
       id: employeeId,
@@ -215,7 +308,8 @@ export async function POST(request: NextRequest) {
     };
 
     try {
-      await sendOtpEmail(email, otp);
+      const deliveredByEmail = await sendOtpEmail(email, otp);
+      if (!deliveredByEmail) devCode = otp;
       await pendingRegistrations.deleteMany({ $or: [{ email }, { id: employeeId }] });
       await pendingRegistrations.insertOne(pendingRegistration);
     } catch (error) {
@@ -225,7 +319,11 @@ export async function POST(request: NextRequest) {
       }, { status: 503 });
     }
 
-    return NextResponse.json({ status: 'pending', email });
+    return NextResponse.json({
+      status: 'pending',
+      email,
+      ...(devCode ? { devCode, testNotice: 'Email delivery is disabled locally. Use the development code shown here.' } : {})
+    });
   }
 
   if (action === 'verify-otp') {
@@ -264,7 +362,7 @@ export async function POST(request: NextRequest) {
       salary_rate: Number(pending.salary_rate) || 25000,
       role: 'employee' as const,
       approved: false,
-      profile_pic: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+      profile_pic: undefined,
       createdAt: new Date()
     };
     await employees.insertOne(employee);

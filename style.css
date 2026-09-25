@@ -96,7 +96,7 @@ body, html {
   width: 72px;
   height: 72px;
   object-fit: contain;
-  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.3));
+  filter: brightness(1.5) contrast(1.15) drop-shadow(0 4px 12px rgba(0, 0, 0, 0.3));
 }
 
 .brand-titles h1 {
