@@ -118,6 +118,12 @@ function getPeriodStartInput(payrollDate: string) {
   return `${periodStart.getFullYear()}-${pad(periodStart.getMonth() + 1)}-${pad(periodStart.getDate())}`;
 }
 
+function getDeviceDateInputValue() {
+  const now = new Date();
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
 function formatPayrollDate(payrollDate: string) {
   const [year, month, day] = payrollDate.split('-').map(Number);
   return new Date(year, month - 1, day).toLocaleDateString('en-PH', {
@@ -449,7 +455,7 @@ export default function Home() {
     loan_sss: 0,
     loan_pagibig: 0,
     other_deductions: 0,
-    payroll_date: '2026-07-28'
+    payroll_date: getDeviceDateInputValue()
   });
 
   // Payslip View Modal
@@ -492,7 +498,7 @@ export default function Home() {
       loan_sss: 0,
       loan_pagibig: 0,
       other_deductions: 0,
-      payroll_date: '2026-07-28'
+      payroll_date: getDeviceDateInputValue()
     });
   };
 
@@ -1592,7 +1598,10 @@ export default function Home() {
           <div className="flex items-center gap-3">
             {currentUser.role === 'admin' && (
               <button
-                onClick={() => setActiveView('process-payroll')}
+                onClick={() => {
+                  handleResetPayrollForm();
+                  setActiveView('process-payroll');
+                }}
                 className="px-6 py-2.5 bg-[#f1c40f] text-[#0f3b2c] font-bold text-sm rounded-full shadow-lg shadow-yellow-500/20 hover:bg-yellow-400 active:scale-95 transition flex items-center gap-2"
               >
                 <Plus className="w-4 h-4" />
