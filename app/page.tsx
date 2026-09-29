@@ -25,6 +25,7 @@ function useIsMounted() {
 
 import Image from 'next/image';
 import ExcelJS from 'exceljs';
+import { jsPDF } from 'jspdf';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Users,
@@ -72,6 +73,7 @@ interface Employee {
 
 interface PayrollRecord {
   id: number;
+  _id?: string;
   employeeUid?: string;
   employee_id: string;
   name: string;
@@ -421,6 +423,7 @@ export default function Home() {
   // Modals
   const [isEmpModalOpen, setIsEmpModalOpen] = useState(false);
   const [editingEmpId, setEditingEmpId] = useState<string | null>(null);
+  const [newEmployeePassword, setNewEmployeePassword] = useState('');
   const [empModalForm, setEmpModalForm] = useState<Employee>({
     id: '',
     name: '',
@@ -452,6 +455,7 @@ export default function Home() {
   // Payslip View Modal
   const [selectedPayslip, setSelectedPayslip] = useState<PayrollRecord | null>(null);
   const [payslipCopies, setPayslipCopies] = useState<1 | 2>(1);
+  const [editingPayrollRecord, setEditingPayrollRecord] = useState<PayrollRecord | null>(null);
 
   // Deliverable Code Viewer
   const [deliverableFile, setDeliverableFile] = useState<'database.sql' | 'api.php' | 'db.php' | 'index.html' | 'style.css' | 'script.js'>('database.sql');
@@ -728,6 +732,50 @@ export default function Home() {
     }
   };
 
+  const updateEditingPayrollAmount = (field: 'basic_salary' | 'allowance' | 'absences' | 'cash_advances' | 'sss' | 'phic' | 'pagibig' | 'wtax' | 'loan_sss' | 'loan_pagibig' | 'other_deductions', value: string) => {
+    setEditingPayrollRecord(current => {
+      if (!current) return current;
+      const updated = { ...current, [field]: Number(value) };
+      const grossPay = Number(updated.basic_salary) + Number(updated.allowance);
+      const totalDeduction = Number(updated.absences) + Number(updated.cash_advances) + Number(updated.sss) + Number(updated.phic) + Number(updated.pagibig) + Number(updated.wtax || 0) + Number(updated.loan_sss) + Number(updated.loan_pagibig) + Number(updated.other_deductions || 0);
+      return { ...updated, gross_pay: grossPay, total_deduction: totalDeduction, net_pay: grossPay - totalDeduction };
+    });
+  };
+
+  const handleUpdatePayrollRecord = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editingPayrollRecord?._id) return;
+    try {
+      const response = await fetch('/api/data', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'payroll', mongoId: editingPayrollRecord._id, record: editingPayrollRecord })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message);
+      setPayrollRecords(prev => prev.map(record => record._id === result.record._id ? result.record : record));
+      setEditingPayrollRecord(null);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Unable to update the payroll record.');
+    }
+  };
+
+  const handleDeletePayrollRecord = async (record: PayrollRecord) => {
+    if (!record._id || !confirm(`Delete the payroll record for ${record.name} dated ${record.payroll_date}?`)) return;
+    try {
+      const response = await fetch('/api/data', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'payroll', mongoId: record._id })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message);
+      setPayrollRecords(prev => prev.filter(item => item._id !== record._id));
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Unable to delete the payroll record.');
+    }
+  };
+
   const handleSaveEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -737,7 +785,7 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(editingEmpId
           ? { mongoId: employee?.mongoId, employee: empModalForm }
-          : { action: 'employee', employee: empModalForm })
+          : { action: 'employee', employee: { ...empModalForm, password: newEmployeePassword } })
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.message);
@@ -747,6 +795,7 @@ export default function Home() {
         setEmployees(prev => [...prev, result.employee]);
       }
       setIsEmpModalOpen(false);
+      setNewEmployeePassword('');
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Unable to save the employee profile.');
     }
@@ -778,9 +827,139 @@ export default function Home() {
       alert('No payslip is available for this employee yet.');
       return;
     }
-    setPayslipCopies(1);
-    setSelectedPayslip(latestPayroll);
-    window.setTimeout(() => window.print(), 100);
+    downloadPayslipPdf(latestPayroll);
+  };
+
+  const downloadPayslipPdf = async (record: PayrollRecord) => {
+    const pdf = new jsPDF();
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const margin = 18;
+    const formatMoney = (amount: number) => `PHP ${Number(amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+    let y = 20;
+
+    try {
+      const logoResponse = await fetch('/mit-seal.png');
+      if (logoResponse.ok) {
+        const logoBlob = await logoResponse.blob();
+        const logoData = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.onerror = () => reject(new Error('Unable to load the school logo.'));
+          reader.readAsDataURL(logoBlob);
+        });
+        pdf.addImage(logoData, 'PNG', pageWidth / 2 - 9, 7, 18, 18);
+        y = 31;
+      }
+    } catch (error) {
+      console.error('Unable to add the school logo to the payslip PDF:', error);
+    }
+
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(15);
+    pdf.setTextColor(15, 59, 44);
+    pdf.text('Mahardika Institute of Technology, Inc.', pageWidth / 2, y, { align: 'center' });
+    y += 6;
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(8);
+    pdf.setTextColor(75, 85, 99);
+    pdf.text('ILMOH st. Lamion, Bongao, Tawi-Tawi', pageWidth / 2, y, { align: 'center' });
+    y += 6;
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(11);
+    pdf.setTextColor(15, 59, 44);
+    pdf.text('PAYSLIP', pageWidth / 2, y, { align: 'center' });
+    y += 5;
+    pdf.setDrawColor(43, 175, 154);
+    pdf.line(margin, y, pageWidth - margin, y);
+    y += 9;
+
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(10);
+    pdf.setTextColor(31, 41, 55);
+    pdf.setFont('helvetica', 'bold');
+    pdf.text('Name of Employee:', margin, y);
+    pdf.setFont('helvetica', 'normal');
+    pdf.text(record.name, margin + 34, y);
+    y += 7;
+    pdf.setFont('helvetica', 'bold');
+    pdf.text('Payslip for the period covered:', margin, y);
+    pdf.setFont('helvetica', 'normal');
+    pdf.text(getPayslipPeriod(record.payroll_date), margin + 56, y);
+    y += 10;
+
+    const acknowledgment = '"I HEREBY ACKNOWLEDGE to have received from MAHARDIKA INSTITUTE OF TECHNOLOGY, INC. with business address at ILMOH st. Lamion, Bongao, Tawi-Tawi, the sum specified herein as full compensation for the service rendered."';
+    pdf.setDrawColor(43, 175, 154);
+    pdf.setLineWidth(1);
+    pdf.line(margin, y - 2, margin, y + 10);
+    pdf.setLineWidth(0.2);
+    pdf.setFontSize(8);
+    pdf.text(pdf.splitTextToSize(acknowledgment, pageWidth - margin * 2 - 5), margin + 4, y + 2);
+    y += 23;
+
+    const addSectionHeading = (heading: string) => {
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(10);
+      pdf.setTextColor(31, 94, 74);
+      pdf.text(heading, margin, y);
+      y += 6;
+    };
+    const addAmountRow = (label: string, amount: number, bold = false) => {
+      pdf.setFont('helvetica', bold ? 'bold' : 'normal');
+      pdf.setFontSize(bold ? 9 : 8);
+      pdf.setTextColor(bold ? 185 : 31, bold ? 28 : 41, bold ? 28 : 55);
+      pdf.text(label, margin, y);
+      pdf.text(formatMoney(amount), pageWidth - margin, y, { align: 'right' });
+      y += 5;
+    };
+
+    addAmountRow('Gross Pay:', record.gross_pay, true);
+    y += 3;
+    addSectionHeading('Less: Deduction');
+    addAmountRow('Absences / Late', record.absences);
+    addAmountRow('Cash Advances', record.cash_advances);
+    addAmountRow('SSS Premium Contribution', record.sss);
+    addAmountRow('PHIC Premium Contribution', record.phic);
+    addAmountRow('Pag-IBIG Premium Contribution', record.pagibig);
+    addAmountRow('Wtax', Number(record.wtax || 0));
+    y += 2;
+    addSectionHeading('Loan');
+    addAmountRow('Loan: SSS', record.loan_sss);
+    addAmountRow('Loan: Pag-IBIG', record.loan_pagibig);
+    addAmountRow('Other deduction', Number(record.other_deductions || 0));
+    pdf.setDrawColor(226, 239, 233);
+    pdf.line(margin, y - 2, pageWidth - margin, y - 2);
+    addAmountRow('Total Deduction:', record.total_deduction, true);
+    y += 3;
+
+    pdf.setFillColor(15, 62, 56);
+    pdf.roundedRect(margin, y, pageWidth - margin * 2, 15, 2, 2, 'F');
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(10);
+    pdf.setTextColor(255, 255, 255);
+    pdf.text('Net Pay:', margin + 5, y + 10);
+    pdf.setTextColor(241, 196, 15);
+    pdf.setFontSize(14);
+    pdf.text(formatMoney(record.net_pay), pageWidth - margin - 5, y + 10, { align: 'right' });
+    y += 29;
+
+    pdf.setDrawColor(107, 114, 128);
+    pdf.line(margin, y, pageWidth / 2 - 10, y);
+    pdf.line(pageWidth / 2 + 10, y, pageWidth - margin, y);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(8);
+    pdf.setTextColor(75, 85, 99);
+    pdf.text('Prepared & Paid by:', margin, y + 6);
+    pdf.text('Payment Received by:', pageWidth / 2 + 10, y + 6);
+    pdf.setFont('helvetica', 'normal');
+    pdf.text('Cashier', margin, y + 12);
+    pdf.text(record.name, pageWidth / 2 + 10, y + 12);
+    pdf.setFontSize(7);
+    pdf.text('Employee Signature over Printed Name', pageWidth / 2 + 10, y + 17);
+    pdf.text(`Date: ${formatPayrollDate(record.payroll_date)}`, margin, y + 23);
+    pdf.text(`Date: ${formatPayrollDate(record.payroll_date)}`, pageWidth / 2 + 10, y + 23);
+
+    const safeEmployeeId = record.employee_id.replace(/[^a-zA-Z0-9-_]/g, '_');
+    pdf.save(`MIT_Payslip_${safeEmployeeId}_${record.payroll_date}.pdf`);
   };
 
   const handleOpenPayslip = (record: PayrollRecord) => {
@@ -804,8 +983,26 @@ export default function Home() {
       const result = await response.json();
       if (!response.ok) throw new Error(result.message);
       setEmployees(prev => prev.map(item => item.mongoId === employee.mongoId ? { ...item, approved: true } : item));
+      if (!result.notificationSent) alert('Account approved, but the email notification could not be sent. Check the email provider configuration.');
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Unable to approve the employee account.');
+    }
+  };
+
+  const handleRejectEmployee = async (employee: Employee) => {
+    if (!employee.mongoId || !confirm(`Reject the registration for ${employee.name}? They can register again later.`)) return;
+    try {
+      const response = await fetch('/api/data', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reject-employee', mongoId: employee.mongoId })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message);
+      setEmployees(prev => prev.filter(item => item.mongoId !== employee.mongoId));
+      if (!result.notificationSent) alert('Registration rejected, but the email notification could not be sent. Check the email provider configuration.');
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Unable to reject the employee registration.');
     }
   };
 
@@ -1101,7 +1298,7 @@ export default function Home() {
                         <input
                           type="number"
                           className="w-full px-3 py-3 text-sm border border-emerald-200 rounded-xl bg-[#f5fbf9]"
-                          value={regData.salary_rate}
+                          value={displayPayrollNumber(regData.salary_rate)}
                           onChange={e => setRegData({ ...regData, salary_rate: Number(e.target.value) })}
                           required
                         />
@@ -1420,24 +1617,53 @@ export default function Home() {
               >
                 {/* Stats Grid */}
                 <div className="grid grid-cols-4 gap-6">
-                  <motion.div whileHover={{ y: -3 }} className="bg-white rounded-[28px] p-6 shadow-sm border border-[#dcf1ec] flex flex-col">
-                    <p className="text-[#2baf9a] text-[10px] uppercase font-bold tracking-wider">Total Employees</p>
-                    <p className="text-3xl font-black mt-1 text-[#0f3b2c]">{totalEmployees}</p>
-                    <p className="text-xs text-gray-400 mt-auto">Active Personnel</p>
-                  </motion.div>
+                  {currentUser.role === 'admin' ? (
+                    <>
+                      <motion.div whileHover={{ y: -3 }} className="bg-white rounded-[28px] p-6 shadow-sm border border-[#dcf1ec] flex flex-col">
+                        <p className="text-[#2baf9a] text-[10px] uppercase font-bold tracking-wider">Total Employees</p>
+                        <p className="text-3xl font-black mt-1 text-[#0f3b2c]">{totalEmployees}</p>
+                        <p className="text-xs text-gray-400 mt-auto">Active Personnel</p>
+                      </motion.div>
 
-                  <motion.div whileHover={{ y: -3 }} className="bg-white rounded-[28px] p-6 shadow-sm border border-[#dcf1ec] flex flex-col">
-                    <p className="text-[#2baf9a] text-[10px] uppercase font-bold tracking-wider">Total Payslips</p>
-                    <p className="text-3xl font-black mt-1 text-[#0f3b2c]">{totalPayslips}</p>
-                    <p className="text-xs text-gray-400 mt-auto">Disbursed Records</p>
-                  </motion.div>
+                      <motion.div whileHover={{ y: -3 }} className="bg-white rounded-[28px] p-6 shadow-sm border border-[#dcf1ec] flex flex-col">
+                        <p className="text-[#2baf9a] text-[10px] uppercase font-bold tracking-wider">Total Payslips</p>
+                        <p className="text-3xl font-black mt-1 text-[#0f3b2c]">{totalPayslips}</p>
+                        <p className="text-xs text-gray-400 mt-auto">Disbursed Records</p>
+                      </motion.div>
 
-                  <motion.div whileHover={{ y: -3 }} className="bg-white rounded-[28px] p-6 shadow-sm border border-[#dcf1ec] flex flex-col">
-                    <p className="text-[#2baf9a] text-[10px] uppercase font-bold tracking-wider">Disbursed Payroll</p>
-                    <p className="text-3xl font-black mt-1 text-[#0f3b2c]">₱{(totalPayrollSum / 1000000).toFixed(2)}M</p>
-                    <p className="text-xs text-gray-400 mt-auto">Current Cycle Total</p>
-                  </motion.div>
+                      <motion.div whileHover={{ y: -3 }} className="bg-white rounded-[28px] p-6 shadow-sm border border-[#dcf1ec] flex flex-col">
+                        <p className="text-[#2baf9a] text-[10px] uppercase font-bold tracking-wider">Disbursed Payroll</p>
+                        <p className="text-3xl font-black mt-1 text-[#0f3b2c]">₱{(totalPayrollSum / 1000000).toFixed(2)}M</p>
+                        <p className="text-xs text-gray-400 mt-auto">Current Cycle Total</p>
+                      </motion.div>
+                    </>
+                  ) : (
+                    <>
+                      <motion.div whileHover={{ y: -3 }} className="bg-white rounded-[28px] p-6 shadow-sm border border-[#dcf1ec] flex flex-col">
+                        <p className="text-[#2baf9a] text-[10px] uppercase font-bold tracking-wider">My Payslips</p>
+                        <p className="text-3xl font-black mt-1 text-[#0f3b2c]">{totalPayslips}</p>
+                        <p className="text-xs text-gray-400 mt-auto">Personal payroll records</p>
+                      </motion.div>
 
+                      <motion.div whileHover={{ y: -3 }} className="bg-white rounded-[28px] p-6 shadow-sm border border-[#dcf1ec] flex flex-col">
+                        <p className="text-[#2baf9a] text-[10px] uppercase font-bold tracking-wider">Gross Earnings</p>
+                        <p className="text-2xl font-black mt-1 text-[#0f3b2c]">₱{filteredRecords.reduce((sum, record) => sum + Number(record.gross_pay || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+                        <p className="text-xs text-gray-400 mt-auto">Across your payslips</p>
+                      </motion.div>
+
+                      <motion.div whileHover={{ y: -3 }} className="bg-white rounded-[28px] p-6 shadow-sm border border-[#dcf1ec] flex flex-col">
+                        <p className="text-[#b91c1c] text-[10px] uppercase font-bold tracking-wider">Total Deductions</p>
+                        <p className="text-2xl font-black mt-1 text-[#0f3b2c]">₱{filteredRecords.reduce((sum, record) => sum + Number(record.total_deduction || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+                        <p className="text-xs text-gray-400 mt-auto">Across your payslips</p>
+                      </motion.div>
+
+                      <motion.div whileHover={{ y: -3 }} className="bg-white rounded-[28px] p-6 shadow-sm border border-[#dcf1ec] flex flex-col">
+                        <p className="text-[#237a6b] text-[10px] uppercase font-bold tracking-wider">Net Pay</p>
+                        <p className="text-2xl font-black mt-1 text-[#0f3b2c]">₱{totalPayrollSum.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+                        <p className="text-xs text-gray-400 mt-auto">Your total disbursement</p>
+                      </motion.div>
+                    </>
+                  )}
                 </div>
 
                 {/* Employee Payroll Status Table */}
@@ -1485,11 +1711,11 @@ export default function Home() {
                                 <motion.button
                                   whileHover={{ scale: 1.1 }}
                                   whileTap={{ scale: 0.9 }}
-                                  onClick={() => handleOpenPayslip(p)}
+                                  onClick={() => currentUser.role === 'admin' ? handleOpenPayslip(p) : downloadPayslipPdf(p)}
                                   className="p-2 rounded-lg bg-[#eef7f4] hover:bg-[#2baf9a] hover:text-white text-[#0f3b2c] transition cursor-pointer"
                                   title="View Electronic Payslip"
                                 >
-                                  <Eye className="w-4 h-4" />
+                                  {currentUser.role === 'admin' ? <Eye className="w-4 h-4" /> : <Download className="w-4 h-4" />}
                                 </motion.button>
                               </td>
                             </tr>
@@ -1543,6 +1769,7 @@ export default function Home() {
                       whileTap={{ scale: 0.97 }}
                       onClick={() => {
                         setEditingEmpId(null);
+                        setNewEmployeePassword('');
                         setEmpModalForm({
                           id: '',
                           name: '',
@@ -1602,15 +1829,26 @@ export default function Home() {
                             <td className="px-6 py-4 text-center">
                               <div className="flex items-center justify-center gap-2">
                                 {e.role === 'employee' && e.approved === false && (
-                                  <motion.button
-                                    whileHover={{ scale: 1.05 }}
-                                    whileTap={{ scale: 0.95 }}
-                                    onClick={() => handleApproveEmployee(e)}
-                                    className="px-3 py-2 rounded-lg bg-amber-100 hover:bg-amber-500 hover:text-white text-amber-800 text-[10px] font-bold transition cursor-pointer"
-                                    title="Approve Account"
-                                  >
-                                    Approve
-                                  </motion.button>
+                                  <>
+                                    <motion.button
+                                      whileHover={{ scale: 1.05 }}
+                                      whileTap={{ scale: 0.95 }}
+                                      onClick={() => handleApproveEmployee(e)}
+                                      className="px-3 py-2 rounded-lg bg-amber-100 hover:bg-amber-500 hover:text-white text-amber-800 text-[10px] font-bold transition cursor-pointer"
+                                      title="Approve Account"
+                                    >
+                                      Approve
+                                    </motion.button>
+                                    <motion.button
+                                      whileHover={{ scale: 1.05 }}
+                                      whileTap={{ scale: 0.95 }}
+                                      onClick={() => handleRejectEmployee(e)}
+                                      className="px-3 py-2 rounded-lg bg-red-50 hover:bg-red-600 hover:text-white text-red-700 text-[10px] font-bold transition cursor-pointer"
+                                      title="Reject Registration"
+                                    >
+                                      Reject
+                                    </motion.button>
+                                  </>
                                 )}
                                 <motion.button
                                   whileHover={{ scale: 1.1 }}
@@ -1958,6 +2196,7 @@ export default function Home() {
                         <th className="px-6 py-4">Net Pay</th>
                         <th className="px-6 py-4">Date</th>
                         <th className="px-6 py-4 text-center">Payslip</th>
+                        {currentUser.role === 'admin' && <th className="px-6 py-4 text-center">Manage</th>}
                       </tr>
                     </thead>
                     <tbody className="text-sm">
@@ -1978,13 +2217,33 @@ export default function Home() {
                             <motion.button
                               whileHover={{ scale: 1.1 }}
                               whileTap={{ scale: 0.9 }}
-                              onClick={() => handleOpenPayslip(p)}
+                              onClick={() => currentUser.role === 'admin' ? handleOpenPayslip(p) : downloadPayslipPdf(p)}
                               className="p-2 bg-[#eef7f4] hover:bg-[#2baf9a] hover:text-white text-[#0f3b2c] rounded-xl transition cursor-pointer"
-                              title="Print Electronic Payslip"
+                              title={currentUser.role === 'admin' ? 'View, download, or print payslip' : 'Download payslip PDF'}
                             >
-                              <Printer className="w-4 h-4" />
+                              {currentUser.role === 'admin' ? <Printer className="w-4 h-4" /> : <Download className="w-4 h-4" />}
                             </motion.button>
                           </td>
+                          {currentUser.role === 'admin' && (
+                            <td className="px-6 py-4 text-center">
+                              <div className="flex items-center justify-center gap-2">
+                                <button
+                                  onClick={() => setEditingPayrollRecord({ ...p })}
+                                  className="p-2 bg-[#eef7f4] hover:bg-[#2baf9a] hover:text-white text-[#0f3b2c] rounded-xl transition cursor-pointer"
+                                  title="Edit payroll record"
+                                >
+                                  <PenSquare className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => handleDeletePayrollRecord(p)}
+                                  className="p-2 bg-red-50 hover:bg-red-600 hover:text-white text-red-700 rounded-xl transition cursor-pointer"
+                                  title="Delete payroll record"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
+                          )}
                         </tr>
                       ))}
                     </tbody>
@@ -2088,11 +2347,11 @@ export default function Home() {
                             <motion.button
                               whileHover={{ scale: 1.1 }}
                               whileTap={{ scale: 0.9 }}
-                              onClick={() => handleOpenPayslip(p)}
+                              onClick={() => currentUser.role === 'admin' ? handleOpenPayslip(p) : downloadPayslipPdf(p)}
                               className="p-2 bg-[#eef7f4] hover:bg-[#2baf9a] hover:text-white text-[#0f3b2c] rounded-xl transition cursor-pointer"
-                              title="Print Electronic Payslip"
+                              title={currentUser.role === 'admin' ? 'View, download, or print payslip' : 'Download payslip PDF'}
                             >
-                              <Printer className="w-4 h-4" />
+                              {currentUser.role === 'admin' ? <Printer className="w-4 h-4" /> : <Download className="w-4 h-4" />}
                             </motion.button>
                           </td>
                         </tr>
@@ -2364,7 +2623,20 @@ export default function Home() {
                       required
                     />
                   </div>
-                  
+                  {!editingEmpId && (
+                    <div>
+                      <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Initial Password</label>
+                      <input
+                        type="password"
+                        minLength={6}
+                        autoComplete="new-password"
+                        className="w-full p-3 text-sm border border-[#dcf1ec] rounded-xl bg-[#f5fbf9] focus:outline-none focus:ring-1 focus:ring-[#2baf9a]"
+                        value={newEmployeePassword}
+                        onChange={e => setNewEmployeePassword(e.target.value)}
+                        required
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex justify-end gap-3 pt-4 border-t border-[#e2efe9]">
@@ -2374,6 +2646,99 @@ export default function Home() {
                   <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} type="submit" className="px-6 py-2.5 text-xs font-bold text-white bg-[#0f3e38] rounded-full hover:bg-[#1f5e4a] cursor-pointer shadow-sm">
                     Save Employee Profile
                   </motion.button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {editingPayrollRecord && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setEditingPayrollRecord(null)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="relative z-10 bg-white w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl border border-[#dcf1ec]"
+            >
+              <div className="bg-[#0f3e38] text-white p-5 flex justify-between items-center">
+                <div>
+                  <h3 className="font-extrabold">Edit Payroll Record</h3>
+                  <p className="text-xs text-[#a3d9cb] mt-1">{editingPayrollRecord.name} · {editingPayrollRecord.employee_id}</p>
+                </div>
+                <button onClick={() => setEditingPayrollRecord(null)} className="text-white/80 hover:text-white text-2xl cursor-pointer" title="Close">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <form onSubmit={handleUpdatePayrollRecord} className="p-6 space-y-5">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Basic Salary (₱)</label>
+                    <input type="number" min="0" step="0.01" value={displayPayrollNumber(Number(editingPayrollRecord.basic_salary || 0))} onChange={event => updateEditingPayrollAmount('basic_salary', event.target.value)} className="w-full p-3 text-sm border border-[#dcf1ec] rounded-xl bg-[#f5fbf9]" required />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Allowance (₱)</label>
+                    <input type="number" min="0" step="0.01" value={displayPayrollNumber(Number(editingPayrollRecord.allowance || 0))} onChange={event => updateEditingPayrollAmount('allowance', event.target.value)} className="w-full p-3 text-sm border border-[#dcf1ec] rounded-xl bg-[#f5fbf9]" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Absences / Late Deduction (₱)</label>
+                    <input type="number" min="0" step="0.01" value={displayPayrollNumber(Number(editingPayrollRecord.absences || 0))} onChange={event => updateEditingPayrollAmount('absences', event.target.value)} className="w-full p-3 text-sm border border-[#dcf1ec] rounded-xl bg-[#f5fbf9]" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Cash Advances (₱)</label>
+                    <input type="number" min="0" step="0.01" value={displayPayrollNumber(Number(editingPayrollRecord.cash_advances || 0))} onChange={event => updateEditingPayrollAmount('cash_advances', event.target.value)} className="w-full p-3 text-sm border border-[#dcf1ec] rounded-xl bg-[#f5fbf9]" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-600 uppercase mb-1">SSS Contribution (₱)</label>
+                    <input type="number" min="0" step="0.01" value={displayPayrollNumber(Number(editingPayrollRecord.sss || 0))} onChange={event => updateEditingPayrollAmount('sss', event.target.value)} className="w-full p-3 text-sm border border-[#dcf1ec] rounded-xl bg-[#f5fbf9]" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-600 uppercase mb-1">PHIC Contribution (₱)</label>
+                    <input type="number" min="0" step="0.01" value={displayPayrollNumber(Number(editingPayrollRecord.phic || 0))} onChange={event => updateEditingPayrollAmount('phic', event.target.value)} className="w-full p-3 text-sm border border-[#dcf1ec] rounded-xl bg-[#f5fbf9]" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Pag-IBIG Contribution (₱)</label>
+                    <input type="number" min="0" step="0.01" value={displayPayrollNumber(Number(editingPayrollRecord.pagibig || 0))} onChange={event => updateEditingPayrollAmount('pagibig', event.target.value)} className="w-full p-3 text-sm border border-[#dcf1ec] rounded-xl bg-[#f5fbf9]" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Withholding Tax (₱)</label>
+                    <input type="number" min="0" step="0.01" value={displayPayrollNumber(Number(editingPayrollRecord.wtax || 0))} onChange={event => updateEditingPayrollAmount('wtax', event.target.value)} className="w-full p-3 text-sm border border-[#dcf1ec] rounded-xl bg-[#f5fbf9]" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-600 uppercase mb-1">SSS Loan (₱)</label>
+                    <input type="number" min="0" step="0.01" value={displayPayrollNumber(Number(editingPayrollRecord.loan_sss || 0))} onChange={event => updateEditingPayrollAmount('loan_sss', event.target.value)} className="w-full p-3 text-sm border border-[#dcf1ec] rounded-xl bg-[#f5fbf9]" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Pag-IBIG Loan (₱)</label>
+                    <input type="number" min="0" step="0.01" value={displayPayrollNumber(Number(editingPayrollRecord.loan_pagibig || 0))} onChange={event => updateEditingPayrollAmount('loan_pagibig', event.target.value)} className="w-full p-3 text-sm border border-[#dcf1ec] rounded-xl bg-[#f5fbf9]" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Other Deductions (₱)</label>
+                    <input type="number" min="0" step="0.01" value={displayPayrollNumber(Number(editingPayrollRecord.other_deductions || 0))} onChange={event => updateEditingPayrollAmount('other_deductions', event.target.value)} className="w-full p-3 text-sm border border-[#dcf1ec] rounded-xl bg-[#f5fbf9]" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Payroll Date</label>
+                    <input type="date" value={editingPayrollRecord.payroll_date} onChange={event => setEditingPayrollRecord(current => current ? { ...current, payroll_date: event.target.value } : current)} className="w-full p-3 text-sm border border-[#dcf1ec] rounded-xl bg-[#f5fbf9]" required />
+                  </div>
+                </div>
+
+                <div className="rounded-xl bg-[#0f3e38] text-white p-4 grid grid-cols-3 gap-3 text-sm">
+                  <div><span className="text-xs text-[#a3d9cb]">Gross Pay</span><p className="font-bold">₱{Number(editingPayrollRecord.gross_pay).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p></div>
+                  <div><span className="text-xs text-[#ffb1b1]">Total Deduction</span><p className="font-bold">₱{Number(editingPayrollRecord.total_deduction).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p></div>
+                  <div><span className="text-xs text-[#f1c40f]">Net Pay</span><p className="font-bold text-[#f1c40f]">₱{Number(editingPayrollRecord.net_pay).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p></div>
+                </div>
+
+                <div className="flex justify-end gap-3 border-t border-[#e2efe9] pt-4">
+                  <button type="button" onClick={() => setEditingPayrollRecord(null)} className="px-5 py-2.5 text-sm font-bold text-gray-600 bg-gray-100 rounded-full hover:bg-gray-200 cursor-pointer">Cancel</button>
+                  <button type="submit" className="px-6 py-2.5 text-sm font-bold text-white bg-[#0f3e38] rounded-full hover:bg-[#1f5e4a] cursor-pointer">Save Changes</button>
                 </div>
               </form>
             </motion.div>
@@ -2417,21 +2782,34 @@ export default function Home() {
                 <motion.button
                   whileHover={{ scale: 1.03 }}
                   whileTap={{ scale: 0.97 }}
-                  onClick={() => handlePrintPayslip(1)}
-                  className="px-6 py-2.5 bg-[#0f3e38] hover:bg-[#1f5e4a] text-white font-bold text-xs rounded-full flex items-center gap-2 cursor-pointer shadow-sm"
-                >
-                  <Printer className="w-4 h-4 text-[#f1c40f]" />
-                  <span>Print 1 Copy</span>
-                </motion.button>
-                <motion.button
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.97 }}
-                  onClick={() => handlePrintPayslip(2)}
+                  onClick={() => downloadPayslipPdf(selectedPayslip)}
                   className="px-6 py-2.5 bg-[#237a6b] hover:bg-[#1f5e4a] text-white font-bold text-xs rounded-full flex items-center gap-2 cursor-pointer shadow-sm"
                 >
-                  <Printer className="w-4 h-4 text-[#f1c40f]" />
-                  <span>Print 2 Copies</span>
+                  <Download className="w-4 h-4" />
+                  <span>Download PDF</span>
                 </motion.button>
+                {currentUser.role === 'admin' && (
+                  <>
+                    <motion.button
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.97 }}
+                      onClick={() => handlePrintPayslip(1)}
+                      className="px-6 py-2.5 bg-[#0f3e38] hover:bg-[#1f5e4a] text-white font-bold text-xs rounded-full flex items-center gap-2 cursor-pointer shadow-sm"
+                    >
+                      <Printer className="w-4 h-4 text-[#f1c40f]" />
+                      <span>Print 1 Copy</span>
+                    </motion.button>
+                    <motion.button
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.97 }}
+                      onClick={() => handlePrintPayslip(2)}
+                      className="px-6 py-2.5 bg-[#0f3e38] hover:bg-[#1f5e4a] text-white font-bold text-xs rounded-full flex items-center gap-2 cursor-pointer shadow-sm"
+                    >
+                      <Printer className="w-4 h-4 text-[#f1c40f]" />
+                      <span>Print 2 Copies</span>
+                    </motion.button>
+                  </>
+                )}
                 <button
                   onClick={() => setSelectedPayslip(null)}
                   className="px-5 py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold text-xs rounded-full cursor-pointer"
