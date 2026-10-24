@@ -22,14 +22,12 @@ const hardcodedAdmin = {
 };
 
 function toAccountEmployee(employee: Record<string, unknown>) {
-  const normalized = toEmployee(employee);
-  return employee.role === 'admin'
-    ? { ...normalized, name: 'Cashier', position: 'Cashier', profile_pic: undefined }
-    : normalized;
+  return toEmployee(employee);
 }
 
-function isHardcodedAdminLogin(login: string) {
-  return login === hardcodedAdmin.id || login.toLowerCase() === hardcodedAdmin.email;
+function isHardcodedAdminLogin(login: string, profileEmail?: string) {
+  const normalizedLogin = login.toLowerCase();
+  return login === hardcodedAdmin.id || normalizedLogin === hardcodedAdmin.email || normalizedLogin === profileEmail;
 }
 
 function hashOtp(code: string) {
@@ -43,6 +41,12 @@ export async function GET() {
   const database = await getDatabase();
   const employee = await database.collection('employees').findOne({ userId: session.userId });
   if (!employee) {
+    if (session.userId === hardcodedAdmin.userId && session.role === 'admin') {
+      const profile = await database.collection('adminProfiles').findOne({ userId: session.userId });
+      return NextResponse.json({
+        user: toAccountEmployee({ ...hardcodedAdmin, ...(profile || {}) })
+      });
+    }
     const response = NextResponse.json({ user: null });
     clearSessionCookie(response);
     return response;
@@ -141,11 +145,12 @@ export async function POST(request: NextRequest) {
     const storedEmployee = await employees.findOne({
       $or: [{ email: login.toLowerCase() }, { id: login }]
     });
-    const isValidHardcodedAdmin = isHardcodedAdminLogin(login) && password === 'admin123';
+    const adminProfile = await database.collection('adminProfiles').findOne({ userId: hardcodedAdmin.userId });
+    const isValidHardcodedAdmin = isHardcodedAdminLogin(login, typeof adminProfile?.email === 'string' ? adminProfile.email : undefined) && password === 'admin123';
     if (!storedEmployee && !isValidHardcodedAdmin) {
       return NextResponse.json({ status: 'error', message: 'Invalid email or password.' }, { status: 401 });
     }
-    const employee = storedEmployee || hardcodedAdmin;
+    const employee = storedEmployee || { ...hardcodedAdmin, ...(adminProfile || {}) };
     if (storedEmployee && !(await bcrypt.compare(password, String(storedEmployee.passwordHash)))) {
       return NextResponse.json({ status: 'error', message: 'Invalid email or password.' }, { status: 401 });
     }
@@ -164,7 +169,7 @@ export async function POST(request: NextRequest) {
       return response;
     }
 
-    const trustedDeviceToken = await getTrustedDeviceToken();
+    const trustedDeviceToken = await getTrustedDeviceToken(String(employee.userId));
     if (trustedDeviceToken) {
       const trustedDevice = await database.collection('trustedDevices').findOne({
         userId: String(employee.userId),
@@ -254,7 +259,7 @@ export async function POST(request: NextRequest) {
     };
     const response = NextResponse.json({ status: 'success', user: toAccountEmployee(employee) });
     setSessionCookie(response, user);
-    setTrustedDeviceCookie(response, trustedDeviceToken);
+    setTrustedDeviceCookie(response, String(employee.userId), trustedDeviceToken);
     return response;
   }
 

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useSyncExternalStore } from 'react';
+import React, { useState, useEffect, useRef, useSyncExternalStore } from 'react';
 
 const emptySubscribe = () => () => {};
 const positions = ['FACULTY', 'STAFF', 'REGISTRAR', 'CASHIER', 'DEAN', 'VPAA', 'HRMO'];
@@ -124,6 +124,12 @@ function getDeviceDateInputValue() {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
+function getDaysInMonth(monthValue: string) {
+  if (!/^\d{4}-\d{2}$/.test(monthValue)) return 31;
+  const [year, month] = monthValue.split('-').map(Number);
+  return new Date(year, month, 0).getDate();
+}
+
 function formatPayrollDate(payrollDate: string) {
   const [year, month, day] = payrollDate.split('-').map(Number);
   return new Date(year, month - 1, day).toLocaleDateString('en-PH', {
@@ -138,35 +144,147 @@ function displayPayrollNumber(value: number) {
   return numericValue === 0 ? '' : numericValue;
 }
 
-function compressProfileImage(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const image = new window.Image();
-    const objectUrl = URL.createObjectURL(file);
-    image.onload = () => {
-      const maxDimension = 1200;
-      const scale = Math.min(1, maxDimension / Math.max(image.naturalWidth, image.naturalHeight));
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
-      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
-      canvas.getContext('2d')?.drawImage(image, 0, 0, canvas.width, canvas.height);
-      URL.revokeObjectURL(objectUrl);
-      canvas.toBlob(blob => {
-        if (!blob) {
-          reject(new Error('The selected image could not be compressed.'));
-          return;
-        }
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result));
-        reader.onerror = () => reject(new Error('The compressed image could not be read.'));
-        reader.readAsDataURL(blob);
-      }, 'image/jpeg', 0.78);
-    };
-    image.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      reject(new Error('Please choose a valid image file.'));
-    };
-    image.src = objectUrl;
+function ProfileImageCropper({
+  imageUrl,
+  onCancel,
+  onConfirm
+}: {
+  imageUrl: string;
+  onCancel: () => void;
+  onConfirm: (image: string) => void;
+}) {
+  const cropSize = 240;
+  const outputSize = 600;
+  const imageRef = useRef<HTMLImageElement>(null);
+  const dragStart = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
+  const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 });
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [error, setError] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const baseScale = imageDimensions.width && imageDimensions.height
+    ? cropSize / Math.min(imageDimensions.width, imageDimensions.height)
+    : 0;
+  const displayWidth = imageDimensions.width * baseScale * zoom;
+  const displayHeight = imageDimensions.height * baseScale * zoom;
+
+  const clampOffset = (x: number, y: number, width = displayWidth, height = displayHeight) => ({
+    x: Math.min(0, Math.max(cropSize - width, x)),
+    y: Math.min(0, Math.max(cropSize - height, y))
   });
+
+  const handleZoomChange = (nextZoom: number) => {
+    const centerX = cropSize / 2;
+    const centerY = cropSize / 2;
+    const imageX = (centerX - offset.x) / displayWidth;
+    const imageY = (centerY - offset.y) / displayHeight;
+    const nextWidth = imageDimensions.width * baseScale * nextZoom;
+    const nextHeight = imageDimensions.height * baseScale * nextZoom;
+    setZoom(nextZoom);
+    setOffset(clampOffset(centerX - imageX * nextWidth, centerY - imageY * nextHeight, nextWidth, nextHeight));
+  };
+
+  const handleConfirmCrop = () => {
+    const image = imageRef.current;
+    if (!image || !baseScale) return;
+    setIsProcessing(true);
+    setError('');
+    try {
+      const scale = baseScale * zoom;
+      const cropX = -offset.x / scale;
+      const cropY = -offset.y / scale;
+      const sourceSize = cropSize / scale;
+      const canvas = document.createElement('canvas');
+      canvas.width = outputSize;
+      canvas.height = outputSize;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Your browser could not prepare the cropped image.');
+      context.drawImage(image, cropX, cropY, sourceSize, sourceSize, 0, 0, outputSize, outputSize);
+      const croppedImage = canvas.toDataURL('image/jpeg', 0.82);
+      onConfirm(croppedImage);
+    } catch (cropError) {
+      setError(cropError instanceof Error ? cropError.message : 'Unable to crop this image.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-start sm:items-center justify-center overflow-y-auto bg-black/60 p-3 sm:p-4">
+      <div role="dialog" aria-modal="true" aria-labelledby="profile-crop-title" className="my-auto w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl sm:p-6">
+        <h3 id="profile-crop-title" className="text-lg font-extrabold text-[#0f3e38]">Crop profile picture</h3>
+        <p className="mt-1 text-sm text-gray-500">Drag the image to position it, adjust the zoom, then confirm your crop.</p>
+        <div
+          className="mx-auto mt-5 h-[240px] w-[240px] max-w-full overflow-hidden rounded-full bg-[#0f3e38] ring-4 ring-[#2baf9a]/20 touch-none"
+          onPointerDown={event => {
+            if (!imageDimensions.width) return;
+            event.currentTarget.setPointerCapture(event.pointerId);
+            dragStart.current = {
+              x: event.clientX,
+              y: event.clientY,
+              offsetX: offset.x,
+              offsetY: offset.y
+            };
+          }}
+          onPointerMove={event => {
+            if (!dragStart.current) return;
+            setOffset(clampOffset(
+              dragStart.current.offsetX + event.clientX - dragStart.current.x,
+              dragStart.current.offsetY + event.clientY - dragStart.current.y
+            ));
+          }}
+          onPointerUp={() => { dragStart.current = null; }}
+          onPointerCancel={() => { dragStart.current = null; }}
+        >
+          {imageUrl && (
+            <img
+              ref={imageRef}
+              src={imageUrl}
+              alt="Crop preview"
+              draggable={false}
+              onLoad={event => {
+                const { naturalWidth, naturalHeight } = event.currentTarget;
+                setImageDimensions({ width: naturalWidth, height: naturalHeight });
+                const scale = cropSize / Math.min(naturalWidth, naturalHeight);
+                setOffset({ x: (cropSize - naturalWidth * scale) / 2, y: (cropSize - naturalHeight * scale) / 2 });
+              }}
+              onError={() => setError('This image could not be opened. Please choose another image.')}
+              style={{ width: displayWidth, height: displayHeight, maxWidth: 'none', transform: `translate(${offset.x}px, ${offset.y}px)` }}
+              className="pointer-events-none block select-none"
+            />
+          )}
+        </div>
+        <label className="mt-5 block text-xs font-bold uppercase tracking-wide text-gray-600" htmlFor="profile-image-zoom">
+          Zoom
+        </label>
+        <input
+          id="profile-image-zoom"
+          type="range"
+          min="1"
+          max="3"
+          step="0.01"
+          value={zoom}
+          onChange={event => handleZoomChange(Number(event.target.value))}
+          disabled={!imageDimensions.width}
+          className="mt-2 w-full accent-[#237a6b]"
+        />
+        {error && <p role="alert" className="mt-3 text-sm font-medium text-red-700">{error}</p>}
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button type="button" onClick={onCancel} className="rounded-full bg-gray-100 px-5 py-2.5 text-sm font-bold text-gray-700 hover:bg-gray-200">
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleConfirmCrop}
+            disabled={!imageDimensions.width || isProcessing}
+            className="rounded-full bg-[#0f3e38] px-5 py-2.5 text-sm font-bold text-white hover:bg-[#1f5e4a] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isProcessing ? 'Preparing…' : 'Confirm crop'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function PayslipCopy({ record }: { record: PayrollRecord }) {
@@ -241,31 +359,8 @@ export default function Home() {
   const [currentUser, setCurrentUser] = useState<Employee | null>(null);
   const [sessionReady, setSessionReady] = useState(false);
 
-  useEffect(() => {
-    Promise.all([
-      fetch('/api/auth').then(response => response.json()),
-      fetch('/api/data').then(response => response.ok ? response.json() : null)
-    ]).then(([authData, data]) => {
-      setCurrentUser(authData.user ?? null);
-      if (data) {
-        setEmployees(data.employees);
-        setPayrollRecords(data.payrollRecords);
-      }
-    }).catch(() => setCurrentUser(null)).finally(() => setSessionReady(true));
-  }, []);
-
-  useEffect(() => {
-    if (!currentUser) return;
-    setProfileForm({
-      name: currentUser.name,
-      position: currentUser.position,
-      department: currentUser.department,
-      profile_pic: currentUser.profile_pic || ''
-    });
-  }, [currentUser]);
-
   const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot'>('login');
-  
+
   // Login Form
   const [loginUser, setLoginUser] = useState('');
   const [loginPass, setLoginPass] = useState('');
@@ -282,8 +377,9 @@ export default function Home() {
   const [forgotNotice, setForgotNotice] = useState('');
 
   // Profile Form
-  const [profileForm, setProfileForm] = useState({ name: '', position: '', department: '', profile_pic: '' });
-  const [profilePhoto, setProfilePhoto] = useState<File | null>(null);
+  const [profileForm, setProfileForm] = useState({ name: '', position: '', department: '', email: '', contact: '', profile_pic: '' });
+  const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
+  const [profileCropUrl, setProfileCropUrl] = useState<string | null>(null);
   const [profileMessage, setProfileMessage] = useState('');
 
   // Register Form
@@ -421,10 +517,15 @@ export default function Home() {
 
   // Employee Search
   const [empSearch, setEmpSearch] = useState('');
-  const [employeeSort, setEmployeeSort] = useState<'id' | 'name' | 'department'>('id');
-  const [payrollSort, setPayrollSort] = useState<'new-old' | 'old-new'>('new-old');
+  const [employeeSort, setEmployeeSort] = useState<'id' | 'name' | 'department'>('name');
+  const [payrollSearch, setPayrollSearch] = useState('');
   const [payrollMonth, setPayrollMonth] = useState('');
   const [payrollYear, setPayrollYear] = useState('');
+  const [payrollDay, setPayrollDay] = useState('');
+  const [reportMonth, setReportMonth] = useState('');
+  const [reportDay, setReportDay] = useState('');
+  const [isReportCalendarOpen, setIsReportCalendarOpen] = useState(false);
+  const [reportPrintDate, setReportPrintDate] = useState(getDeviceDateInputValue());
 
   // Modals
   const [isEmpModalOpen, setIsEmpModalOpen] = useState(false);
@@ -467,6 +568,42 @@ export default function Home() {
   const [deliverableFile, setDeliverableFile] = useState<'database.sql' | 'api.php' | 'db.php' | 'index.html' | 'style.css' | 'script.js'>('database.sql');
   const [sourceCodeText, setSourceCodeText] = useState('');
   const [isCopied, setIsCopied] = useState(false);
+
+  const syncProfileForm = (user: Employee | null) => {
+    if (!user) return;
+    setProfileForm({
+      name: user.name,
+      position: user.position,
+      department: user.department,
+      email: user.email,
+      contact: user.contact || '',
+      profile_pic: user.profile_pic || ''
+    });
+  };
+
+  useEffect(() => {
+    return () => {
+      if (profileCropUrl) URL.revokeObjectURL(profileCropUrl);
+    };
+  }, [profileCropUrl]);
+
+  useEffect(() => {
+    Promise.all([
+      fetch('/api/auth').then(response => response.json()),
+      fetch('/api/data').then(response => response.ok ? response.json() : null)
+    ]).then(([authData, data]) => {
+      const nextUser = authData.user ?? null;
+      setCurrentUser(nextUser);
+      syncProfileForm(nextUser);
+      if (data) {
+        setEmployees(data.employees);
+        setPayrollRecords(data.payrollRecords);
+      }
+    }).catch(() => {
+      setCurrentUser(null);
+      setProfileForm({ name: '', position: '', department: '', email: '', contact: '', profile_pic: '' });
+    }).finally(() => setSessionReady(true));
+  }, []);
 
   // Fetch deliverable source code content
   useEffect(() => {
@@ -513,7 +650,9 @@ export default function Home() {
           const result = await response.json();
           if (!response.ok) throw new Error(result.message);
           if (result.status === 'success') {
+            setActiveView('dashboard');
             setCurrentUser(result.user);
+            syncProfileForm(result.user);
             const dataResponse = await fetch('/api/data');
             const data = await dataResponse.json();
             setEmployees(data.employees);
@@ -578,7 +717,9 @@ export default function Home() {
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.message);
+      setActiveView('dashboard');
       setCurrentUser(result.user);
+      syncProfileForm(result.user);
       const dataResponse = await fetch('/api/data');
       const data = await dataResponse.json();
       setEmployees(data.employees);
@@ -631,7 +772,6 @@ export default function Home() {
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const profilePic = profilePhoto ? await compressProfileImage(profilePhoto) : profileForm.profile_pic;
       const response = await fetch('/api/data', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -641,14 +781,21 @@ export default function Home() {
             name: profileForm.name,
             position: profileForm.position,
             department: profileForm.department,
-            profile_pic: profilePic
+            email: profileForm.email,
+            contact: profileForm.contact,
+            profile_pic: profilePhoto || undefined
           }
         })
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.message);
       setCurrentUser(result.employee);
+      syncProfileForm(result.employee);
+      if (result.employee?.role === 'admin') {
+        setEmployees(previous => previous.map(employee => employee.id === result.employee.id ? result.employee : employee));
+      }
       setProfilePhoto(null);
+      setProfileCropUrl(null);
       setProfileMessage('Profile updated successfully.');
     } catch (error) {
       setProfileMessage(error instanceof Error ? error.message : 'Unable to update your profile.');
@@ -661,6 +808,7 @@ export default function Home() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'logout' })
     });
+    setActiveView('dashboard');
     setCurrentUser(null);
   };
 
@@ -978,6 +1126,23 @@ export default function Home() {
     window.setTimeout(() => window.print(), 0);
   };
 
+  const openReportPrintCalendar = () => {
+    if (reportMonth && reportDay) {
+      setReportPrintDate(`${reportMonth}-${reportDay}`);
+    } else {
+      setReportPrintDate(getDeviceDateInputValue());
+    }
+    setIsReportCalendarOpen(true);
+  };
+
+  const handlePrintSelectedReport = () => {
+    if (!reportPrintDate) return;
+    setReportMonth(reportPrintDate.slice(0, 7));
+    setReportDay(reportPrintDate.slice(8, 10));
+    setIsReportCalendarOpen(false);
+    window.setTimeout(() => window.print(), 100);
+  };
+
   const handleApproveEmployee = async (employee: Employee) => {
     if (!employee.mongoId) return;
     try {
@@ -1012,7 +1177,7 @@ export default function Home() {
     }
   };
 
-  const exportPayrollExcel = () => {
+  const exportPayrollExcel = (records: PayrollRecord[] = displayedPayrollRecords) => {
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'Mahardika Institute of Technology';
     const worksheet = workbook.addWorksheet('Payroll Summary');
@@ -1033,7 +1198,7 @@ export default function Home() {
     worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F5E4A' } };
     worksheet.getRow(1).alignment = { vertical: 'middle', wrapText: true };
 
-    displayedPayrollRecords.forEach(record => {
+    records.forEach(record => {
       const row = worksheet.addRow({
         employeeId: record.employee_id,
         name: record.name,
@@ -1078,11 +1243,18 @@ export default function Home() {
     )
     : payrollRecords;
   const displayedPayrollRecords = filteredRecords
+    .filter(record => {
+      const query = payrollSearch.trim().toLowerCase();
+      return !query || record.employee_id.toLowerCase().includes(query) || record.name.toLowerCase().includes(query);
+    })
     .filter(record => !payrollMonth || record.payroll_date.startsWith(payrollMonth))
     .filter(record => !payrollYear || record.payroll_date.startsWith(`${payrollYear}-`))
-    .sort((first, second) => payrollSort === 'new-old'
-      ? second.payroll_date.localeCompare(first.payroll_date)
-      : first.payroll_date.localeCompare(second.payroll_date));
+    .filter(record => !payrollDay || record.payroll_date.slice(8, 10) === payrollDay)
+    .sort((first, second) => second.payroll_date.localeCompare(first.payroll_date));
+  const reportRecords = payrollRecords
+    .filter(record => !reportMonth || record.payroll_date.startsWith(reportMonth))
+    .filter(record => !reportDay || record.payroll_date.slice(8, 10) === reportDay)
+    .sort((first, second) => second.payroll_date.localeCompare(first.payroll_date));
   const displayedEmployees = employees
     .filter(employee => employee.name.toLowerCase().includes(empSearch.toLowerCase()) || employee.id.toLowerCase().includes(empSearch.toLowerCase()))
     .sort((first, second) => {
@@ -1091,11 +1263,11 @@ export default function Home() {
       return first.id.localeCompare(second.id);
     });
   const totalPayslips = filteredRecords.length;
-  const totalPayrollSum = filteredRecords.reduce((acc, curr) => acc + curr.net_pay, 0);
+  const totalPayrollSum = filteredRecords.reduce((acc, curr) => acc + Number(curr.net_pay || 0), 0);
 
   if (!isMounted || !sessionReady) {
     return (
-      <div className="w-screen h-screen flex bg-[#04231b] overflow-hidden items-center justify-center text-white">
+      <div className="w-full min-h-dvh flex bg-[#04231b] items-center justify-center text-white">
         <div className="animate-pulse text-center">
           <h1 className="text-xl font-bold">Mahardika Institute of Technology</h1>
           <p className="text-xs text-[#2baf9a] mt-1">Loading Payroll System...</p>
@@ -1107,9 +1279,9 @@ export default function Home() {
   // AUTH SCREEN
   if (!currentUser) {
     return (
-      <div className="w-screen h-screen flex bg-[#04231b] overflow-hidden">
+      <div className="w-full min-h-dvh flex flex-col lg:flex-row bg-[#04231b]">
         {/* Left Panel */}
-        <div className="flex-[1.2] relative bg-[url('/mit-school.jpg')] bg-cover bg-center p-14 flex flex-col justify-between text-white">
+        <div className="hidden lg:flex lg:flex-[1.2] relative bg-[url('/mit-school.jpg')] bg-cover bg-center p-14 flex-col justify-between text-white">
           <div className="absolute inset-0 bg-gradient-to-br from-[#0a372b]/70 to-[#04231b]/80 z-10" />
           <div className="relative z-20 h-full flex flex-col">
             <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
@@ -1125,8 +1297,17 @@ export default function Home() {
         </div>
 
         {/* Right Panel */}
-        <div className="flex-1 bg-white flex flex-col justify-center items-center p-12 overflow-y-auto">
-          <div className="w-full max-w-md">
+        <div className="flex-1 min-h-dvh bg-white flex flex-col justify-center items-center p-4 sm:p-8 lg:p-12">
+          <div className="w-full max-w-md py-4">
+            <div className="mb-8 flex items-center gap-3 lg:hidden">
+              <div className="h-14 w-14 shrink-0 overflow-hidden rounded-full bg-[#f5fbf9] p-1 shadow-sm ring-1 ring-emerald-100">
+                <Image src="/mit-seal.png" alt="Mahardika Institute of Technology seal" width={56} height={56} priority className="h-full w-full rounded-full object-contain" />
+              </div>
+              <div className="min-w-0">
+                <h1 className="text-sm font-extrabold leading-tight text-[#0f3b2c]">Mahardika Institute of Technology, Inc.</h1>
+                <p className="mt-1 text-[10px] font-semibold uppercase leading-snug tracking-wider text-[#2baf9a]">Web-Based Employee Payroll Management System</p>
+              </div>
+            </div>
             <AnimatePresence mode="wait">
               {authMode === 'login' ? (
                 <motion.div
@@ -1252,7 +1433,7 @@ export default function Home() {
                       />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs font-bold text-[#0f3b2c] uppercase mb-1">Department</label>
                         <select
@@ -1288,7 +1469,7 @@ export default function Home() {
                       />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs font-bold text-[#0f3b2c] uppercase mb-1">Contact</label>
                         <input
@@ -1391,13 +1572,13 @@ export default function Home() {
                 >
                   <div className="mb-6">
                     <h3 className="text-3xl font-extrabold text-[#0f3b2c]">Reset Password</h3>
-                    <p className="text-sm text-emerald-800/70 mt-1">Use your institutional email to receive a verification code.</p>
+                    <p className="text-sm text-emerald-800/70 mt-1">Use your email to receive a verification code.</p>
                   </div>
 
                   {forgotStep === 'request' ? (
                     <form onSubmit={handleRequestPasswordReset} className="space-y-5">
                       <div>
-                        <label className="block text-xs font-bold text-[#0f3b2c] uppercase tracking-wider mb-2">Institutional Email</label>
+                        <label className="block text-xs font-bold text-[#0f3b2c] uppercase tracking-wider mb-2">Email</label>
                         <input
                           type="email"
                           className="w-full px-5 py-3.5 text-sm border-2 border-emerald-100 rounded-2xl bg-[#f5fbf9]"
@@ -1451,6 +1632,7 @@ export default function Home() {
                 </motion.div>
               )}
             </AnimatePresence>
+
           </div>
         </div>
       </div>
@@ -1459,26 +1641,26 @@ export default function Home() {
 
   // MAIN DASHBOARD LAYOUT
   return (
-    <div className="flex w-screen h-screen overflow-hidden bg-[#f5fbf9] text-[#0f3b2c]">
+    <div className="app-shell flex w-full h-dvh min-h-0 flex-col overflow-hidden bg-[#f5fbf9] text-[#0f3b2c] lg:flex-row">
       {/* Sidebar */}
-      <aside className="w-[280px] min-w-[280px] h-full bg-[#0f3e38] text-white flex flex-col justify-between shrink-0 z-30 shadow-xl">
+      <aside className="w-full shrink-0 bg-[#0f3e38] text-white shadow-xl z-30 lg:w-[280px] lg:min-w-[280px] lg:h-full lg:flex lg:flex-col lg:justify-between">
         <div>
           {/* Logo Header */}
-          <div className="p-8 flex items-center gap-3 border-b border-white/10">
-            <div className="w-14 h-14 rounded-full bg-white flex items-center justify-center shrink-0 overflow-hidden">
-              <Image src="/mit-seal.png" alt="MIT" width={56} height={56} priority unoptimized className="object-contain" referrerPolicy="no-referrer" />
+          <div className="px-4 py-3 flex items-center gap-3 border-b border-white/10 bg-gradient-to-r from-[#0f3e38] to-[#145247] lg:bg-none lg:p-8">
+            <div className="w-11 h-11 lg:w-14 lg:h-14 rounded-full bg-white flex items-center justify-center shrink-0 overflow-hidden shadow-md ring-1 ring-white/20">
+              <Image src="/mit-seal.png" alt="MIT" width={56} height={56} priority unoptimized className="w-full h-full object-contain" referrerPolicy="no-referrer" />
             </div>
-            <div className="leading-tight">
-              <h1 className="text-white font-bold text-sm uppercase tracking-wider">Mahardika</h1>
-              <p className="text-[#2baf9a] text-[10px] font-semibold">Payroll System v2.0</p>
+            <div className="min-w-0 leading-tight">
+              <h1 className="text-white font-bold text-[11px] uppercase tracking-wide lg:text-xs">Mahardika Institute of Technology, Inc.</h1>
+              <p className="mt-1 text-[#8fdac7] text-[9px] font-semibold leading-snug lg:text-[10px]">Web-Based Employee Payroll Management System</p>
             </div>
           </div>
 
           {/* Navigation Items */}
-          <nav className="flex-1 px-4 py-6 space-y-1">
+          <nav className="flex min-w-0 gap-1 overflow-x-auto px-2 py-2 lg:block lg:flex-1 lg:space-y-1 lg:overflow-visible lg:px-4 lg:py-6">
             <button
               onClick={() => setActiveView('dashboard')}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition cursor-pointer ${
+              className={`w-auto shrink-0 flex items-center gap-2 whitespace-nowrap px-3 py-2 rounded-xl text-xs font-medium transition cursor-pointer lg:w-full lg:gap-3 lg:px-4 lg:py-3 lg:text-sm ${
                 activeView === 'dashboard' ? 'bg-[#237a6b] text-white shadow-md font-bold' : 'text-white/60 hover:text-white hover:bg-white/5'
               }`}
             >
@@ -1490,7 +1672,7 @@ export default function Home() {
               <>
                 <button
                   onClick={() => setActiveView('employees')}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition cursor-pointer ${
+                  className={`w-auto shrink-0 flex items-center gap-2 whitespace-nowrap px-3 py-2 rounded-xl text-xs font-medium transition cursor-pointer lg:w-full lg:gap-3 lg:px-4 lg:py-3 lg:text-sm ${
                     activeView === 'employees' ? 'bg-[#237a6b] text-white shadow-md font-bold' : 'text-white/60 hover:text-white hover:bg-white/5'
                   }`}
                 >
@@ -1500,7 +1682,7 @@ export default function Home() {
 
                 <button
                   onClick={() => setActiveView('process-payroll')}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition cursor-pointer ${
+                  className={`w-auto shrink-0 flex items-center gap-2 whitespace-nowrap px-3 py-2 rounded-xl text-xs font-medium transition cursor-pointer lg:w-full lg:gap-3 lg:px-4 lg:py-3 lg:text-sm ${
                     activeView === 'process-payroll' ? 'bg-[#237a6b] text-white shadow-md font-bold' : 'text-white/60 hover:text-white hover:bg-white/5'
                   }`}
                 >
@@ -1512,7 +1694,7 @@ export default function Home() {
 
             <button
               onClick={() => setActiveView('payroll-history')}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition cursor-pointer ${
+              className={`w-auto shrink-0 flex items-center gap-2 whitespace-nowrap px-3 py-2 rounded-xl text-xs font-medium transition cursor-pointer lg:w-full lg:gap-3 lg:px-4 lg:py-3 lg:text-sm ${
                 activeView === 'payroll-history' ? 'bg-[#237a6b] text-white shadow-md font-bold' : 'text-white/60 hover:text-white hover:bg-white/5'
               }`}
             >
@@ -1522,7 +1704,7 @@ export default function Home() {
 
             <button
               onClick={() => setActiveView('settings')}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition cursor-pointer ${
+              className={`w-auto shrink-0 flex items-center gap-2 whitespace-nowrap px-3 py-2 rounded-xl text-xs font-medium transition cursor-pointer lg:w-full lg:gap-3 lg:px-4 lg:py-3 lg:text-sm ${
                 activeView === 'settings' ? 'bg-[#237a6b] text-white shadow-md font-bold' : 'text-white/60 hover:text-white hover:bg-white/5'
               }`}
             >
@@ -1533,7 +1715,7 @@ export default function Home() {
             {currentUser.role === 'admin' && (
               <button
                 onClick={() => setActiveView('reports')}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition cursor-pointer ${
+                className={`w-auto shrink-0 flex items-center gap-2 whitespace-nowrap px-3 py-2 rounded-xl text-xs font-medium transition cursor-pointer lg:w-full lg:gap-3 lg:px-4 lg:py-3 lg:text-sm ${
                   activeView === 'reports' ? 'bg-[#237a6b] text-white shadow-md font-bold' : 'text-white/60 hover:text-white hover:bg-white/5'
                 }`}
               >
@@ -1547,15 +1729,15 @@ export default function Home() {
         </div>
 
         {/* User Profile Card */}
-        <div className="p-6">
-          <div className="bg-[#0a372b] p-4 rounded-2xl border border-white/5 flex items-center justify-between gap-3">
+        <div className="p-2 lg:p-6">
+          <div className="bg-[#0a372b] p-2 lg:p-4 rounded-xl lg:rounded-2xl border border-white/5 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 overflow-hidden">
-              {currentUser.role === 'admin' ? (
+              {currentUser.profile_pic ? (
+                <Image src={currentUser.profile_pic} alt="User" width={36} height={36} className="w-9 h-9 rounded-full object-cover border border-[#2baf9a] shrink-0" referrerPolicy="no-referrer" />
+              ) : currentUser.role === 'admin' ? (
                 <div className="w-9 h-9 rounded-full border border-[#2baf9a] bg-white/10 flex items-center justify-center shrink-0">
                   <UserRound className="w-5 h-5 text-[#2baf9a]" aria-label="Cashier account" />
                 </div>
-              ) : currentUser.profile_pic ? (
-                <Image src={currentUser.profile_pic} alt="User" width={36} height={36} className="rounded-full object-cover border border-[#2baf9a] shrink-0" referrerPolicy="no-referrer" />
               ) : (
                 <div className="w-9 h-9 rounded-full border border-[#2baf9a] bg-white/10 flex items-center justify-center shrink-0">
                   <UserRound className="w-5 h-5 text-[#2baf9a]" aria-label="Employee account" />
@@ -1569,7 +1751,7 @@ export default function Home() {
                 <p className="text-xs text-white/40 truncate">{currentUser.position || (currentUser.role === 'admin' ? 'Finance Controller' : 'Instructor')}</p>
               </div>
             </div>
-            <button onClick={handleLogout} className="p-2 bg-white/10 hover:bg-red-600 rounded-lg text-white/60 hover:text-white transition shrink-0" title="Sign Out">
+            <button onClick={handleLogout} aria-label="Sign out" className="p-2 bg-white/10 hover:bg-red-600 rounded-lg text-white/60 hover:text-white transition shrink-0" title="Sign Out">
               <LogOut className="w-4 h-4" />
             </button>
           </div>
@@ -1577,11 +1759,11 @@ export default function Home() {
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 h-full overflow-y-auto flex flex-col">
+      <main className="app-main flex-1 min-w-0 min-h-0 overflow-y-auto flex flex-col">
         {/* Header */}
-        <header className="h-20 bg-gradient-to-r from-[#0f3e38] to-[#1a665a] flex items-center justify-between px-10 shadow-md shrink-0 text-white">
-          <div>
-            <h2 className="text-white font-bold text-xl tracking-tight">
+        <header className="min-h-16 bg-gradient-to-r from-[#0f3e38] to-[#1a665a] flex items-center justify-between gap-3 px-4 py-3 shadow-md shrink-0 text-white sm:px-6 lg:h-20 lg:px-10">
+          <div className="min-w-0">
+            <h2 className="text-white font-bold text-base tracking-tight sm:text-xl truncate">
               {activeView === 'dashboard' && 'Mahardika Institute of Technology, Inc.'}
               {activeView === 'employees' && 'Employee Directory'}
               {activeView === 'process-payroll' && 'Payroll Processing'}
@@ -1590,7 +1772,7 @@ export default function Home() {
               {activeView === 'settings' && 'Account Settings'}
               {activeView === 'deliverables' && 'Source Code Deliverables'}
             </h2>
-            <p className="text-[#2baf9a] text-xs font-medium">
+            <p className="text-[#2baf9a] text-[10px] sm:text-xs font-medium truncate">
               {activeView === 'dashboard' ? 'Web-Based Employee Payroll Management System' : `Welcome back, ${currentUser.name}`}
             </p>
           </div>
@@ -1602,7 +1784,7 @@ export default function Home() {
                   handleResetPayrollForm();
                   setActiveView('process-payroll');
                 }}
-                className="px-6 py-2.5 bg-[#f1c40f] text-[#0f3b2c] font-bold text-sm rounded-full shadow-lg shadow-yellow-500/20 hover:bg-yellow-400 active:scale-95 transition flex items-center gap-2"
+                className="px-3 py-2 sm:px-6 sm:py-2.5 bg-[#f1c40f] text-[#0f3b2c] font-bold text-xs sm:text-sm rounded-full shadow-lg shadow-yellow-500/20 hover:bg-yellow-400 active:scale-95 transition flex items-center gap-2 shrink-0"
               >
                 <Plus className="w-4 h-4" />
                 <span>New Payroll</span>
@@ -1612,7 +1794,7 @@ export default function Home() {
         </header>
 
         {/* Content Body */}
-        <div className="flex-1 p-8 space-y-8 overflow-y-auto">
+        <div className="app-content flex-1 min-h-0 p-3 space-y-5 overflow-y-auto sm:p-5 sm:space-y-6 lg:p-8 lg:space-y-8">
           <AnimatePresence mode="wait">
             {/* VIEW: DASHBOARD */}
             {activeView === 'dashboard' && (
@@ -1625,7 +1807,7 @@ export default function Home() {
                 className="space-y-8"
               >
                 {/* Stats Grid */}
-                <div className="grid grid-cols-4 gap-6">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-3 xl:gap-6">
                   {currentUser.role === 'admin' ? (
                     <>
                       <motion.div whileHover={{ y: -3 }} className="bg-white rounded-[28px] p-6 shadow-sm border border-[#dcf1ec] flex flex-col">
@@ -1635,33 +1817,27 @@ export default function Home() {
                       </motion.div>
 
                       <motion.div whileHover={{ y: -3 }} className="bg-white rounded-[28px] p-6 shadow-sm border border-[#dcf1ec] flex flex-col">
-                        <p className="text-[#2baf9a] text-[10px] uppercase font-bold tracking-wider">Total Payslips</p>
-                        <p className="text-3xl font-black mt-1 text-[#0f3b2c]">{totalPayslips}</p>
-                        <p className="text-xs text-gray-400 mt-auto">Disbursed Records</p>
+                        <p className="text-[#2baf9a] text-[10px] uppercase font-bold tracking-wider">Total Net Salary</p>
+                        <p className="text-2xl font-black mt-1 text-[#0f3b2c]">₱{totalPayrollSum.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+                        <p className="text-xs text-gray-400 mt-auto">Across all payroll records</p>
                       </motion.div>
 
                       <motion.div whileHover={{ y: -3 }} className="bg-white rounded-[28px] p-6 shadow-sm border border-[#dcf1ec] flex flex-col">
-                        <p className="text-[#2baf9a] text-[10px] uppercase font-bold tracking-wider">Disbursed Payroll</p>
-                        <p className="text-3xl font-black mt-1 text-[#0f3b2c]">₱{(totalPayrollSum / 1000000).toFixed(2)}M</p>
-                        <p className="text-xs text-gray-400 mt-auto">Current Cycle Total</p>
+                        <p className="text-[#2baf9a] text-[10px] uppercase font-bold tracking-wider">Total Payslips</p>
+                        <p className="text-3xl font-black mt-1 text-[#0f3b2c]">{totalPayslips}</p>
+                        <p className="text-xs text-gray-400 mt-auto">Payroll records issued</p>
                       </motion.div>
                     </>
                   ) : (
                     <>
                       <motion.div whileHover={{ y: -3 }} className="bg-white rounded-[28px] p-6 shadow-sm border border-[#dcf1ec] flex flex-col">
-                        <p className="text-[#2baf9a] text-[10px] uppercase font-bold tracking-wider">My Payslips</p>
-                        <p className="text-3xl font-black mt-1 text-[#0f3b2c]">{totalPayslips}</p>
-                        <p className="text-xs text-gray-400 mt-auto">Personal payroll records</p>
-                      </motion.div>
-
-                      <motion.div whileHover={{ y: -3 }} className="bg-white rounded-[28px] p-6 shadow-sm border border-[#dcf1ec] flex flex-col">
-                        <p className="text-[#2baf9a] text-[10px] uppercase font-bold tracking-wider">Gross Earnings</p>
+                        <p className="text-[#2baf9a] text-[10px] uppercase font-bold tracking-wider">Gross Pay</p>
                         <p className="text-2xl font-black mt-1 text-[#0f3b2c]">₱{filteredRecords.reduce((sum, record) => sum + Number(record.gross_pay || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
                         <p className="text-xs text-gray-400 mt-auto">Across your payslips</p>
                       </motion.div>
 
                       <motion.div whileHover={{ y: -3 }} className="bg-white rounded-[28px] p-6 shadow-sm border border-[#dcf1ec] flex flex-col">
-                        <p className="text-[#b91c1c] text-[10px] uppercase font-bold tracking-wider">Total Deductions</p>
+                        <p className="text-[#b91c1c] text-[10px] uppercase font-bold tracking-wider">Deductions</p>
                         <p className="text-2xl font-black mt-1 text-[#0f3b2c]">₱{filteredRecords.reduce((sum, record) => sum + Number(record.total_deduction || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
                         <p className="text-xs text-gray-400 mt-auto">Across your payslips</p>
                       </motion.div>
@@ -1677,20 +1853,20 @@ export default function Home() {
 
                 {/* Employee Payroll Status Table */}
                 <div className="bg-white rounded-[28px] shadow-sm border border-[#dcf1ec] flex-1 flex flex-col overflow-hidden">
-                  <div className="px-8 py-5 border-b border-[#e2efe9] flex justify-between items-center bg-[#fcfdfd]">
+                  <div className="px-4 py-4 sm:px-6 lg:px-8 border-b border-[#e2efe9] flex flex-wrap justify-between items-center gap-3 bg-[#fcfdfd]">
                     <h3 className="font-bold text-[#0f3e38]">Employee Payroll Status</h3>
                     <div className="flex items-center gap-2">
                       <input
                         type="text"
                         placeholder="Search records..."
-                        className="bg-[#eef7f4] border-0 rounded-full text-xs px-4 py-2 w-48 focus:ring-1 focus:ring-[#2baf9a] focus:outline-none"
+                        className="bg-[#eef7f4] border-0 rounded-full text-xs px-4 py-2 w-full sm:w-48 focus:ring-1 focus:ring-[#2baf9a] focus:outline-none"
                         value={empSearch}
                         onChange={e => setEmpSearch(e.target.value)}
                       />
                     </div>
                   </div>
                   <div className="flex-1 overflow-x-auto">
-                    <table className="w-full border-collapse">
+                    <table className="w-full min-w-[720px] border-collapse">
                       <thead>
                         <tr className="bg-[#1f5e4a] text-white text-left">
                           <th className="px-8 py-4 font-semibold text-xs uppercase tracking-wider">Employee ID</th>
@@ -1744,7 +1920,7 @@ export default function Home() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -15 }}
                 transition={{ duration: 0.2 }}
-                className="bg-white rounded-[28px] border border-[#dcf1ec] p-8 shadow-sm space-y-6"
+                className="bg-white rounded-2xl sm:rounded-[28px] border border-[#dcf1ec] p-4 sm:p-6 lg:p-8 shadow-sm space-y-5 sm:space-y-6"
               >
                 <div className="flex items-center justify-between flex-wrap gap-4 border-b border-[#e2efe9] pb-5">
                   <div>
@@ -1769,8 +1945,8 @@ export default function Home() {
                       value={employeeSort}
                       onChange={e => setEmployeeSort(e.target.value as 'id' | 'name' | 'department')}
                     >
+                      <option value="name">Sort by Name (A-Z)</option>
                       <option value="id">Sort by ID</option>
-                      <option value="name">Sort A-Z</option>
                       <option value="department">Sort by Department</option>
                     </select>
                     <motion.button
@@ -1800,10 +1976,11 @@ export default function Home() {
                 </div>
 
                 <div className="overflow-x-auto rounded-2xl border border-[#e2efe9]">
-                  <table className="w-full text-left border-collapse">
+                  <table className="w-full min-w-[760px] text-left border-collapse">
                     <thead>
                       <tr className="bg-[#1f5e4a] text-white text-xs uppercase font-semibold tracking-wider">
-                        <th className="px-6 py-4">Employee Name </th>
+                        <th className="px-6 py-4">Employee ID</th>
+                        <th className="px-6 py-4">Employee Name</th>
                         <th className="px-6 py-4">Position</th>
                         <th className="px-6 py-4">Department</th>
                         <th className="px-6 py-4">Contact No.</th>
@@ -1816,14 +1993,12 @@ export default function Home() {
                     <tbody className="text-sm">
                       {displayedEmployees.map(e => (
                           <tr key={e.id} className="border-b border-[#e2efe9] hover:bg-[#f5fbf9] transition-colors">
+                            <td className="px-6 py-4 font-mono font-bold text-[#2baf9a]">{e.id}</td>
                             <td className="px-6 py-4 flex items-center gap-3">
                               <div className="w-[38px] h-[38px] rounded-full border border-[#2baf9a] bg-[#eef7f4] flex items-center justify-center shrink-0">
                                 <UserRound className="w-5 h-5 text-[#2baf9a]" aria-label="Employee account" />
                               </div>
-                              <div>
-                                <div className="font-bold text-[#0f3b2c]">{e.name}</div>
-                                <div className="text-xs font-mono font-bold text-[#2baf9a]">ID: {e.id}</div>
-                              </div>
+                              <div className="font-bold text-[#0f3b2c]">{e.name}</div>
                             </td>
                             <td className="px-6 py-4 text-[#0f3b2c] font-medium">{e.position}</td>
                             <td className="px-6 py-4 text-gray-600">{e.department}</td>
@@ -1908,7 +2083,7 @@ export default function Home() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -15 }}
                 transition={{ duration: 0.2 }}
-                className="bg-white rounded-[28px] border border-[#dcf1ec] p-8 shadow-sm space-y-6"
+                className="bg-white rounded-2xl sm:rounded-[28px] border border-[#dcf1ec] p-4 sm:p-6 lg:p-8 shadow-sm space-y-5 sm:space-y-6"
               >
                 <div className="flex items-center justify-between border-b border-[#e2efe9] pb-4">
                   <div>
@@ -1928,7 +2103,7 @@ export default function Home() {
                 </div>
 
                 <form onSubmit={handleSavePayroll} className="space-y-6">
-                  <div className="grid grid-cols-3 gap-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4 xl:gap-6">
                     <div>
                       <label className="block text-xs font-bold text-[#0f3b2c] uppercase tracking-wider mb-2">Select Employee</label>
                       <select
@@ -1979,7 +2154,7 @@ export default function Home() {
                       <Plus className="w-4 h-4 text-[#2baf9a]" />
                       <span>Basic Earnings & Allowances</span>
                     </h4>
-                    <div className="grid grid-cols-2 gap-6">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
                       <div>
                         <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Basic Salary (₱)</label>
                         <input
@@ -2010,7 +2185,7 @@ export default function Home() {
                       <Trash2 className="w-4 h-4 text-red-600" />
                       <span>Attendance Absences & Mandatory Deductions</span>
                     </h4>
-                    <div className="grid grid-cols-3 gap-5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-5">
                       <div>
                         <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Absences / Late (minutes)</label>
                         <input
@@ -2115,7 +2290,7 @@ export default function Home() {
                   </div>
 
                   {/* AUTOMATED SUMMARY DISPLAY */}
-                  <div className="bg-[#0f3e38] text-white p-6 rounded-2xl grid grid-cols-3 gap-6 items-center shadow-lg">
+                  <div className="bg-[#0f3e38] text-white p-4 sm:p-6 rounded-2xl grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6 items-center shadow-lg">
                     <div>
                       <div className="text-[10px] font-bold text-[#2baf9a] uppercase tracking-wider">Gross Salary</div>
                       <div className="text-2xl font-black mt-1">₱{calcGross.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
@@ -2153,7 +2328,7 @@ export default function Home() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -15 }}
                 transition={{ duration: 0.2 }}
-                className="bg-white rounded-[28px] border border-[#dcf1ec] p-8 shadow-sm space-y-6"
+                className="bg-white rounded-2xl sm:rounded-[28px] border border-[#dcf1ec] p-4 sm:p-6 lg:p-8 shadow-sm space-y-5 sm:space-y-6"
               >
                 <div className="flex items-center justify-between border-b border-[#e2efe9] pb-4">
                   <div>
@@ -2162,22 +2337,36 @@ export default function Home() {
                   </div>
 
                   <div className="flex items-center gap-2 flex-wrap justify-end">
-                    <select
-                      aria-label="Payroll date sort"
-                      className="px-3 py-2 bg-[#eef7f4] border-0 rounded-full text-xs focus:ring-1 focus:ring-[#2baf9a] focus:outline-none"
-                      value={payrollSort}
-                      onChange={e => setPayrollSort(e.target.value as 'new-old' | 'old-new')}
-                    >
-                      <option value="new-old">New-Old</option>
-                      <option value="old-new">Old-New</option>
-                    </select>
+                    <input
+                      type="search"
+                      aria-label="Search salary records by employee ID or name"
+                      placeholder="Search employee ID or name"
+                      className="w-full sm:w-52 px-3 py-2 bg-[#eef7f4] border-0 rounded-full text-xs focus:ring-1 focus:ring-[#2baf9a] focus:outline-none"
+                      value={payrollSearch}
+                      onChange={e => setPayrollSearch(e.target.value)}
+                    />
                     <input
                       type="month"
                       aria-label="Filter payroll by month"
                       className="px-3 py-2 bg-[#eef7f4] border-0 rounded-full text-xs focus:ring-1 focus:ring-[#2baf9a] focus:outline-none"
                       value={payrollMonth}
-                      onChange={e => setPayrollMonth(e.target.value)}
+                      onChange={e => {
+                        const month = e.target.value;
+                        setPayrollMonth(month);
+                        if (payrollDay && Number(payrollDay) > getDaysInMonth(month)) setPayrollDay('');
+                      }}
                     />
+                    <select
+                      aria-label="Filter payroll by day of month"
+                      className="px-3 py-2 bg-[#eef7f4] border-0 rounded-full text-xs focus:ring-1 focus:ring-[#2baf9a] focus:outline-none"
+                      value={payrollDay}
+                      onChange={e => setPayrollDay(e.target.value)}
+                    >
+                      <option value="">All days</option>
+                      {Array.from({ length: getDaysInMonth(payrollMonth) }, (_, index) => String(index + 1).padStart(2, '0')).map(day => (
+                        <option key={day} value={day}>Day {Number(day)}</option>
+                      ))}
+                    </select>
                     <input
                       type="number"
                       min="2000"
@@ -2192,11 +2381,11 @@ export default function Home() {
                 </div>
 
                 <div className="overflow-x-auto rounded-2xl border border-[#e2efe9]">
-                  <table className="w-full text-left border-collapse">
+                  <table className="w-full min-w-[1000px] text-left border-collapse">
                     <thead>
                       <tr className="bg-[#1f5e4a] text-white text-xs uppercase font-semibold tracking-wider">
                         <th className="px-6 py-4">Employee ID No.</th>
-                        <th className="px-6 py-4">Employee's Name</th>
+                        <th className="px-6 py-4">Employee&apos;s Name</th>
                         <th className="px-6 py-4">Department</th>
                         <th className="px-6 py-4">Basic Salary</th>
                         <th className="px-6 py-4">Allowance</th>
@@ -2269,19 +2458,46 @@ export default function Home() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -15 }}
                 transition={{ duration: 0.2 }}
-                className="report-print-area bg-white rounded-[28px] border border-[#dcf1ec] p-8 shadow-sm space-y-6"
+                className="report-print-area bg-white rounded-2xl sm:rounded-[28px] border border-[#dcf1ec] p-4 sm:p-6 lg:p-8 shadow-sm space-y-5 sm:space-y-6"
               >
-                <div className="flex items-center justify-between border-b border-[#e2efe9] pb-4">
+                <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#e2efe9] pb-4">
                   <div>
                     <h3 className="text-xl font-extrabold text-[#0f3e38]">Financial Reports</h3>
                     <p className="text-xs text-[#2baf9a] font-medium mt-0.5">Institutional payroll expense totals, statutory contributions, and net disbursements</p>
+                    <p className="report-period mt-1 text-xs font-semibold text-gray-500">
+                      {reportMonth
+                        ? `${new Date(`${reportMonth}-01T00:00:00`).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}${reportDay ? ` · Day ${Number(reportDay)}` : ''}`
+                        : reportDay ? `Day ${Number(reportDay)} across all months` : 'All dates'}
+                    </p>
                   </div>
 
-                  <div className="flex gap-3 no-print">
+                  <div className="flex flex-wrap items-center gap-2 no-print">
+                    <input
+                      type="month"
+                      aria-label="Select report month"
+                      className="px-3 py-2 bg-[#eef7f4] border-0 rounded-full text-xs focus:ring-1 focus:ring-[#2baf9a] focus:outline-none"
+                      value={reportMonth}
+                      onChange={e => {
+                        const month = e.target.value;
+                        setReportMonth(month);
+                        if (reportDay && Number(reportDay) > getDaysInMonth(month)) setReportDay('');
+                      }}
+                    />
+                    <select
+                      aria-label="Select report day"
+                      className="px-3 py-2 bg-[#eef7f4] border-0 rounded-full text-xs focus:ring-1 focus:ring-[#2baf9a] focus:outline-none"
+                      value={reportDay}
+                      onChange={e => setReportDay(e.target.value)}
+                    >
+                      <option value="">All days</option>
+                      {Array.from({ length: getDaysInMonth(reportMonth) }, (_, index) => String(index + 1).padStart(2, '0')).map(day => (
+                        <option key={day} value={day}>Day {Number(day)}</option>
+                      ))}
+                    </select>
                     <motion.button
                       whileHover={{ scale: 1.03 }}
                       whileTap={{ scale: 0.97 }}
-                      onClick={() => window.print()}
+                      onClick={openReportPrintCalendar}
                       className="px-6 py-2.5 bg-[#0f3e38] text-white font-bold text-xs rounded-full flex items-center gap-2 hover:bg-[#1f5e4a] transition shadow-sm cursor-pointer"
                     >
                       <Printer className="w-4 h-4 text-[#f1c40f]" />
@@ -2290,7 +2506,7 @@ export default function Home() {
                     <motion.button
                       whileHover={{ scale: 1.03 }}
                       whileTap={{ scale: 0.97 }}
-                      onClick={exportPayrollExcel}
+                      onClick={() => exportPayrollExcel(reportRecords)}
                       className="px-6 py-2.5 bg-[#237a6b] text-white font-bold text-xs rounded-full flex items-center gap-2 hover:bg-[#1f5e4a] transition shadow-sm cursor-pointer"
                     >
                       <FileSpreadsheet className="w-4 h-4" />
@@ -2299,35 +2515,35 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-6">
+                <div className="report-summary-cards grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4 xl:gap-6">
                   <div className="bg-[#f5fbf9] p-6 rounded-2xl border border-[#dcf1ec]">
                     <div className="text-[10px] font-bold text-[#2baf9a] uppercase tracking-wider">Total Gross Disbursements</div>
                     <div className="text-2xl font-black text-[#0f3b2c] mt-1">
-                      ₱{payrollRecords.reduce((a, b) => a + b.gross_pay, 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      ₱{reportRecords.reduce((a, b) => a + Number(b.gross_pay || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </div>
                   </div>
 
                   <div className="bg-[#f5fbf9] p-6 rounded-2xl border border-[#dcf1ec]">
                     <div className="text-[10px] font-bold text-red-500 uppercase tracking-wider">Total Statutory Deductions</div>
                     <div className="text-2xl font-black text-red-600 mt-1">
-                      ₱{payrollRecords.reduce((a, b) => a + b.total_deduction, 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      ₱{reportRecords.reduce((a, b) => a + Number(b.total_deduction || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </div>
                   </div>
 
                   <div className="bg-[#f5fbf9] p-6 rounded-2xl border border-[#dcf1ec]">
                     <div className="text-[10px] font-bold text-[#237a6b] uppercase tracking-wider">Total Net Salary Expense</div>
                     <div className="text-2xl font-black text-[#237a6b] mt-1">
-                      ₱{payrollRecords.reduce((a, b) => a + b.net_pay, 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      ₱{reportRecords.reduce((a, b) => a + Number(b.net_pay || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </div>
                   </div>
                 </div>
 
-                <div className="overflow-x-auto rounded-2xl border border-[#e2efe9]">
-                  <table className="w-full text-left border-collapse">
+                <div className="report-table-wrapper overflow-x-auto rounded-2xl border border-[#e2efe9]">
+                  <table className="report-table w-full min-w-[900px] text-left border-collapse">
                     <thead>
                       <tr className="bg-[#1f5e4a] text-white text-xs uppercase font-semibold tracking-wider">
                         <th className="px-6 py-4">Employee ID No.</th>
-                        <th className="px-6 py-4">Employee's Name</th>
+                        <th className="px-6 py-4">Employee&apos;s Name</th>
                         <th className="px-6 py-4">Department</th>
                         <th className="px-6 py-4">Basic Salary</th>
                         <th className="px-6 py-4">Allowance</th>
@@ -2339,7 +2555,7 @@ export default function Home() {
                       </tr>
                     </thead>
                     <tbody className="text-sm">
-                      {displayedPayrollRecords.map(p => (
+                      {reportRecords.map(p => (
                         <tr key={p.id} className="border-b border-[#e2efe9] hover:bg-[#f5fbf9] transition-colors">
                           <td className="px-6 py-4 font-mono font-bold text-[#2baf9a]">{p.employee_id}</td>
                           <td className="px-6 py-4">
@@ -2379,7 +2595,7 @@ export default function Home() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -15 }}
                 transition={{ duration: 0.2 }}
-                className="bg-white rounded-[28px] border border-[#dcf1ec] p-8 shadow-sm space-y-6"
+                className="bg-white rounded-2xl sm:rounded-[28px] border border-[#dcf1ec] p-4 sm:p-6 lg:p-8 shadow-sm space-y-5 sm:space-y-6"
               >
                 <div className="border-b border-[#e2efe9] pb-5">
                   <h3 className="text-xl font-extrabold text-[#0f3e38]">Account Settings</h3>
@@ -2389,8 +2605,8 @@ export default function Home() {
                 <form onSubmit={handleSaveProfile} className="space-y-6">
                   <div className="flex items-center gap-5">
                     <div className="w-20 h-20 rounded-full overflow-hidden border-2 border-[#2baf9a] bg-[#eef7f4] shrink-0">
-                      {profileForm.profile_pic ? (
-                        <img src={profileForm.profile_pic} alt="Profile" className="w-full h-full object-cover" />
+                      {profilePhoto || profileForm.profile_pic ? (
+                        <img src={profilePhoto || profileForm.profile_pic} alt="Profile preview" className="w-full h-full object-cover" />
                       ) : (
                         <UserRound className="w-9 h-9 m-4 text-[#2baf9a]" />
                       )}
@@ -2400,15 +2616,25 @@ export default function Home() {
                       <input
                         type="file"
                         accept="image/*"
-                        onChange={e => setProfilePhoto(e.target.files?.[0] || null)}
+                        onChange={event => {
+                          const file = event.target.files?.[0];
+                          event.target.value = '';
+                          if (!file) return;
+                          if (!file.type.startsWith('image/')) {
+                            setProfileMessage('Choose a valid image file for your profile picture.');
+                            return;
+                          }
+                          setProfileMessage('');
+                          setProfileCropUrl(URL.createObjectURL(file));
+                        }}
                         className="block w-full text-xs text-gray-600 file:mr-3 file:rounded-full file:border-0 file:bg-[#0f3e38] file:px-4 file:py-2 file:text-xs file:font-bold file:text-white hover:file:bg-[#1f5e4a]"
                       />
-                      <p className="text-[11px] text-gray-400 mt-2">Large images are automatically compressed before upload.</p>
-                      {profilePhoto && <p className="text-[11px] text-[#2baf9a] mt-1">Selected: {profilePhoto.name}</p>}
+                      <p className="text-[11px] text-gray-400 mt-2">Choose an image to crop and preview it before saving your profile.</p>
+                      {profilePhoto && <p className="text-[11px] text-[#2baf9a] mt-1">Crop confirmed. Save your profile to upload it.</p>}
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
                     <div>
                       <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Full Name</label>
                       <input
@@ -2443,14 +2669,26 @@ export default function Home() {
                     </select>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
                     <div>
                       <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Email</label>
-                      <input type="email" value={currentUser.email} readOnly className="w-full p-3 text-sm border border-gray-200 rounded-xl bg-gray-100 text-gray-500 cursor-not-allowed" />
+                      <input
+                        type="email"
+                        value={profileForm.email}
+                        onChange={e => setProfileForm({ ...profileForm, email: e.target.value })}
+                        className="w-full p-3 text-sm border border-[#dcf1ec] rounded-xl bg-[#f5fbf9]"
+                        required
+                      />
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Phone Number</label>
-                      <input type="text" value={currentUser.contact} readOnly className="w-full p-3 text-sm border border-gray-200 rounded-xl bg-gray-100 text-gray-500 cursor-not-allowed" />
+                      <input
+                        type="tel"
+                        value={profileForm.contact}
+                        onChange={e => setProfileForm({ ...profileForm, contact: e.target.value })}
+                        className="w-full p-3 text-sm border border-[#dcf1ec] rounded-xl bg-[#f5fbf9]"
+                        required
+                      />
                     </div>
                   </div>
 
@@ -2478,7 +2716,7 @@ export default function Home() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -15 }}
                 transition={{ duration: 0.2 }}
-                className="bg-white rounded-[28px] border border-[#dcf1ec] p-8 shadow-sm space-y-6"
+                className="bg-white rounded-2xl sm:rounded-[28px] border border-[#dcf1ec] p-4 sm:p-6 lg:p-8 shadow-sm space-y-5 sm:space-y-6"
               >
                 <div>
                   <h3 className="text-xl font-extrabold text-[#0f3e38]">Source Code Deliverables</h3>
@@ -2525,7 +2763,7 @@ export default function Home() {
       {/* MODAL: ADD / EDIT EMPLOYEE */}
       <AnimatePresence>
         {isEmpModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-2 sm:p-4 overflow-y-auto">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -2538,7 +2776,7 @@ export default function Home() {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
               transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-              className="relative z-10 bg-white w-full max-w-xl rounded-[28px] overflow-hidden shadow-2xl border border-[#dcf1ec]"
+              className="relative z-10 my-auto bg-white w-full max-w-xl rounded-2xl sm:rounded-[28px] overflow-hidden shadow-2xl border border-[#dcf1ec]"
             >
               <div className="bg-[#0f3e38] text-white p-6 flex justify-between items-center">
                 <div>
@@ -2549,7 +2787,7 @@ export default function Home() {
               </div>
 
               <form onSubmit={handleSaveEmployee} className="p-6 space-y-4">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Employee ID</label>
                     <input
@@ -2573,7 +2811,7 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Department</label>
                     <select
@@ -2598,7 +2836,7 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Contact Number</label>
                     <input
@@ -2621,7 +2859,7 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Basic Salary (₱)</label>
                     <input
@@ -2664,7 +2902,7 @@ export default function Home() {
 
       <AnimatePresence>
         {editingPayrollRecord && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-2 sm:p-4 overflow-y-auto">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -2676,7 +2914,7 @@ export default function Home() {
               initial={{ opacity: 0, scale: 0.95, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="relative z-10 bg-white w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl border border-[#dcf1ec]"
+              className="relative z-10 my-auto bg-white w-full max-w-3xl max-h-[calc(100dvh-1rem)] sm:max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl border border-[#dcf1ec]"
             >
               <div className="bg-[#0f3e38] text-white p-5 flex justify-between items-center">
                 <div>
@@ -2688,7 +2926,7 @@ export default function Home() {
                 </button>
               </div>
               <form onSubmit={handleUpdatePayrollRecord} className="p-6 space-y-5">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Basic Salary (₱)</label>
                     <input type="number" min="0" step="0.01" value={displayPayrollNumber(Number(editingPayrollRecord.basic_salary || 0))} onChange={event => updateEditingPayrollAmount('basic_salary', event.target.value)} className="w-full p-3 text-sm border border-[#dcf1ec] rounded-xl bg-[#f5fbf9]" required />
@@ -2739,7 +2977,7 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="rounded-xl bg-[#0f3e38] text-white p-4 grid grid-cols-3 gap-3 text-sm">
+                <div className="rounded-xl bg-[#0f3e38] text-white p-4 grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
                   <div><span className="text-xs text-[#a3d9cb]">Gross Pay</span><p className="font-bold">₱{Number(editingPayrollRecord.gross_pay).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p></div>
                   <div><span className="text-xs text-[#ffb1b1]">Total Deduction</span><p className="font-bold">₱{Number(editingPayrollRecord.total_deduction).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p></div>
                   <div><span className="text-xs text-[#f1c40f]">Net Pay</span><p className="font-bold text-[#f1c40f]">₱{Number(editingPayrollRecord.net_pay).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p></div>
@@ -2758,7 +2996,7 @@ export default function Home() {
       {/* MODAL: VIEW ELECTRONIC PAYSLIP */}
       <AnimatePresence>
         {selectedPayslip && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-2 sm:p-4 overflow-y-auto">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -2771,7 +3009,7 @@ export default function Home() {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
               transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-              className="payslip-modal relative z-10 bg-white w-full max-w-2xl max-h-[calc(100vh-2rem)] overflow-y-auto rounded-[28px] shadow-2xl border border-[#dcf1ec]"
+              className="payslip-modal relative z-10 my-auto bg-white w-full max-w-2xl max-h-[calc(100dvh-1rem)] sm:max-h-[calc(100vh-2rem)] overflow-y-auto rounded-2xl sm:rounded-[28px] shadow-2xl border border-[#dcf1ec]"
             >
               <div className="bg-[#0f3e38] text-white p-5 flex justify-between items-center no-print">
                 <div>
@@ -2830,6 +3068,62 @@ export default function Home() {
           </div>
         )}
       </AnimatePresence>
+
+      {profileCropUrl && (
+        <ProfileImageCropper
+          imageUrl={profileCropUrl}
+          onCancel={() => setProfileCropUrl(null)}
+          onConfirm={image => {
+            setProfilePhoto(image);
+            setProfileCropUrl(null);
+            setProfileMessage('');
+          }}
+        />
+      )}
+
+      {isReportCalendarOpen && (
+        <div className="fixed inset-0 z-[55] flex items-center justify-center bg-black/60 p-4 no-print">
+          <div role="dialog" aria-modal="true" aria-labelledby="report-print-date-title" className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl">
+            <h3 id="report-print-date-title" className="text-lg font-extrabold text-[#0f3e38]">Select report date</h3>
+            <p className="mt-1 text-sm text-gray-500">Choose a calendar date to filter the summary before printing.</p>
+            <label htmlFor="report-print-date" className="mt-5 block text-xs font-bold uppercase tracking-wide text-[#0f3b2c]">
+              Payroll date
+            </label>
+            <input
+              id="report-print-date"
+              type="date"
+              value={reportPrintDate}
+              onChange={event => {
+                const date = event.target.value;
+                if (!date) return;
+                setReportPrintDate(date);
+                setReportMonth(date.slice(0, 7));
+                setReportDay(date.slice(8, 10));
+              }}
+              className="mt-2 w-full rounded-xl border border-[#dcf1ec] bg-[#f5fbf9] p-3 text-sm text-[#0f3b2c] focus:outline-none focus:ring-2 focus:ring-[#2baf9a]"
+              required
+            />
+            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setIsReportCalendarOpen(false)}
+                className="rounded-full bg-gray-100 px-5 py-2.5 text-sm font-bold text-gray-700 hover:bg-gray-200"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handlePrintSelectedReport}
+                disabled={!reportPrintDate}
+                className="rounded-full bg-[#0f3e38] px-5 py-2.5 text-sm font-bold text-white hover:bg-[#1f5e4a] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Print Summary
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

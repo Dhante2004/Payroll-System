@@ -75,19 +75,59 @@ export async function PATCH(request: NextRequest) {
     const name = String(profile.name || '').trim();
     const position = String(profile.position || '').trim();
     const department = String(profile.department || '').trim();
+    const email = String(profile.email || '').trim().toLowerCase();
+    const contact = String(profile.contact || '').trim();
     const profilePic = String(profile.profile_pic || '');
-    if (!name || !position || !department) {
-      return NextResponse.json({ message: 'Name, position, and department are required.' }, { status: 400 });
+    if (!name || !position || !department || !email) {
+      return NextResponse.json({ message: 'Name, position, department, and email are required.' }, { status: 400 });
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return NextResponse.json({ message: 'Enter a valid email address.' }, { status: 400 });
     }
     if (profilePic && (!profilePic.startsWith('data:image/') || profilePic.length > 2_000_000)) {
       return NextResponse.json({ message: 'Profile pictures must be compressed image files under 1.5 MB.' }, { status: 400 });
     }
-    const updates: Record<string, string> = { name, position, department };
-    if (profilePic) updates.profile_pic = profilePic;
     const database = await getDatabase();
-    await database.collection('employees').updateOne({ userId: session.userId }, { $set: updates });
-    const employee = await database.collection('employees').findOne({ userId: session.userId });
-    return NextResponse.json({ employee: employee ? toEmployee(employee) : null });
+    const employees = database.collection('employees');
+    if (await employees.findOne({ email, userId: { $ne: session.userId } })) {
+      return NextResponse.json({ message: 'That email address is already in use.' }, { status: 409 });
+    }
+    if (await database.collection('adminProfiles').findOne({ email, userId: { $ne: session.userId } })) {
+      return NextResponse.json({ message: 'That email address is already in use.' }, { status: 409 });
+    }
+    const updates: Record<string, string> = { name, position, department, email, contact };
+    if (profilePic) updates.profile_pic = profilePic;
+    const employee = await employees.findOne({ userId: session.userId });
+    if (employee) {
+      await employees.updateOne({ userId: session.userId }, { $set: updates });
+      const updatedEmployee = await employees.findOne({ userId: session.userId });
+      return NextResponse.json({ employee: updatedEmployee ? toEmployee(updatedEmployee) : null });
+    }
+    if (session.role === 'admin' && session.userId === 'hardcoded-admin-001') {
+      await database.collection('adminProfiles').updateOne(
+        { userId: session.userId },
+        { $set: updates, $setOnInsert: { createdAt: new Date() } },
+        { upsert: true }
+      );
+      const savedProfile = await database.collection('adminProfiles').findOne({ userId: session.userId });
+      return NextResponse.json({
+        employee: {
+          userId: session.userId,
+          id: session.employeeId,
+          name: 'Cashier',
+          position: 'Cashier',
+          department: 'Finance & HR',
+          contact: '09171234567',
+          email: session.email,
+          profile_pic: undefined,
+          role: session.role,
+          approved: true,
+          salary_rate: 65000,
+          ...(savedProfile || {})
+        }
+      });
+    }
+    return NextResponse.json({ message: 'This account cannot be updated.' }, { status: 404 });
   }
 
   if (session.role !== 'admin') return NextResponse.json({ message: 'Administrator access required.' }, { status: 403 });
