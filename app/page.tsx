@@ -1646,11 +1646,14 @@ export default function Home() {
       <aside className="w-full shrink-0 bg-[#0f3e38] text-white shadow-xl z-30 lg:w-[280px] lg:min-w-[280px] lg:h-full lg:flex lg:flex-col lg:justify-between">
         <div>
           {/* Logo Header */}
-          <div className="px-4 py-3 flex items-center gap-3 border-b border-white/10 bg-gradient-to-r from-[#0f3e38] to-[#145247] lg:bg-none lg:p-8">
-            <div className="w-11 h-11 lg:w-14 lg:h-14 rounded-full bg-white flex items-center justify-center shrink-0 overflow-hidden shadow-md ring-1 ring-white/20">
+          <div className="flex items-center gap-3 border-b border-white/10 bg-gradient-to-r from-[#0f3e38] to-[#145247] px-4 py-3 lg:bg-none lg:px-6 lg:py-8">
+            <div className="h-11 w-11 shrink-0 overflow-hidden rounded-full bg-white shadow-md ring-1 ring-white/20 lg:h-14 lg:w-14">
               <Image src="/mit-seal.png" alt="MIT" width={56} height={56} priority unoptimized className="w-full h-full object-contain" referrerPolicy="no-referrer" />
             </div>
-           
+            <div className="min-w-0 leading-tight">
+              <h1 className="text-[11px] font-bold uppercase tracking-wide text-white lg:text-xs">Mahardika Institute of Technology, Inc.</h1>
+              <p className="mt-1 text-[9px] font-semibold leading-snug text-[#8fdac7] lg:text-[10px]">Web-Based Employee Payroll Management System</p>
+            </div>
           </div>
 
           {/* Navigation Items */}
@@ -1761,16 +1764,10 @@ export default function Home() {
         <header className="min-h-16 bg-gradient-to-r from-[#0f3e38] to-[#1a665a] flex items-center justify-between gap-3 px-4 py-3 shadow-md shrink-0 text-white sm:px-6 lg:h-20 lg:px-10">
           <div className="min-w-0">
             <h2 className="text-white font-bold text-base tracking-tight sm:text-xl truncate">
-              {activeView === 'dashboard' && 'Mahardika Institute of Technology, Inc.'}
-              {activeView === 'employees' && 'Employee Directory'}
-              {activeView === 'process-payroll' && 'Payroll Processing'}
-              {activeView === 'payroll-history' && 'Salary Records & Payslips'}
-              {activeView === 'reports' && 'Financial Reports'}
-              {activeView === 'settings' && 'Account Settings'}
-              {activeView === 'deliverables' && 'Source Code Deliverables'}
+              {currentUser.role === 'admin' ? 'Welcome, Admin!' : 'Welcome, Employee!'}
             </h2>
             <p className="text-[#2baf9a] text-[10px] sm:text-xs font-medium truncate">
-              {activeView === 'dashboard' ? 'Web-Based Employee Payroll Management System' : `Welcome back, ${currentUser.name}`}
+              {currentUser.name}
             </p>
           </div>
 
