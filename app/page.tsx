@@ -1324,7 +1324,7 @@ export default function Home() {
 
                   {loginStep === 'credentials' ? <form onSubmit={handleLogin} className="space-y-5">
                     <div>
-                        <label className="block text-xs font-bold text-[#0f3b2c] uppercase tracking-wider mb-2">Employee ID / Email</label>
+                        <label className="block text-xs font-bold text-[#0f3b2c] uppercase tracking-wider mb-2">Employee ID No. / Email</label>
                       <input
                         type="text"
                         className="w-full px-5 py-3.5 text-sm border-2 border-emerald-100 rounded-2xl bg-[#f5fbf9] focus:outline-none focus:border-[#2baf9a] focus:bg-white transition"
@@ -1410,7 +1410,7 @@ export default function Home() {
                   {registrationStep === 'form' ? (
                   <form onSubmit={handleRegister} className="space-y-4">
                     <div>
-                      <label className="block text-xs font-bold text-[#0f3b2c] uppercase mb-1">Employee ID</label>
+                      <label className="block text-xs font-bold text-[#0f3b2c] uppercase mb-1">Employee ID No.</label>
                       <input
                         type="text"
                         className="w-full px-4 py-3 text-sm border border-emerald-200 rounded-xl bg-[#f5fbf9]"
@@ -1650,10 +1650,7 @@ export default function Home() {
             <div className="w-11 h-11 lg:w-14 lg:h-14 rounded-full bg-white flex items-center justify-center shrink-0 overflow-hidden shadow-md ring-1 ring-white/20">
               <Image src="/mit-seal.png" alt="MIT" width={56} height={56} priority unoptimized className="w-full h-full object-contain" referrerPolicy="no-referrer" />
             </div>
-            <div className="min-w-0 leading-tight">
-              <h1 className="text-white font-bold text-[11px] uppercase tracking-wide lg:text-xs">Mahardika Institute of Technology, Inc.</h1>
-              <p className="mt-1 text-[#8fdac7] text-[9px] font-semibold leading-snug lg:text-[10px]">Web-Based Employee Payroll Management System</p>
-            </div>
+           
           </div>
 
           {/* Navigation Items */}
@@ -1869,10 +1866,11 @@ export default function Home() {
                     <table className="w-full min-w-[720px] border-collapse">
                       <thead>
                         <tr className="bg-[#1f5e4a] text-white text-left">
-                          <th className="px-8 py-4 font-semibold text-xs uppercase tracking-wider">Employee ID</th>
+                          <th className="px-8 py-4 font-semibold text-xs uppercase tracking-wider">Employee ID No.</th>
                           <th className="px-6 py-4 font-semibold text-xs uppercase tracking-wider">Name & Department</th>
-                          <th className="px-6 py-4 font-semibold text-xs uppercase tracking-wider">Basic Salary</th>
-                          <th className="px-6 py-4 font-semibold text-xs uppercase tracking-wider">Net Salary</th>
+                          <th className="px-6 py-4 font-semibold text-xs uppercase tracking-wider">Gross Pay</th>
+                          <th className="px-6 py-4 font-semibold text-xs uppercase tracking-wider">Deductions</th>
+                          <th className="px-6 py-4 font-semibold text-xs uppercase tracking-wider">Net Pay</th>
                           <th className="px-8 py-4 font-semibold text-xs uppercase tracking-wider text-center">Status</th>
                           <th className="px-6 py-4 font-semibold text-xs uppercase tracking-wider text-center">Action</th>
                         </tr>
@@ -1887,7 +1885,8 @@ export default function Home() {
                                 <div className="font-bold text-[#0f3b2c]">{p.name}</div>
                                 <div className="text-[10px] text-gray-500">{p.department}</div>
                               </td>
-                              <td className="px-6 py-4 font-medium">₱{p.basic_salary.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                              <td className="px-6 py-4 font-medium">₱{p.gross_pay.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                              <td className="px-6 py-4 font-medium text-red-600">₱{p.total_deduction.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
                               <td className="px-6 py-4 font-bold text-[#0f3b2c]">₱{p.net_pay.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
                               <td className="px-8 py-4 text-center">
                                 <span className="bg-[#2baf9a]/10 text-[#2baf9a] text-[10px] px-3 py-1 rounded-full font-bold uppercase">PAID</span>
@@ -1979,13 +1978,13 @@ export default function Home() {
                   <table className="w-full min-w-[760px] text-left border-collapse">
                     <thead>
                       <tr className="bg-[#1f5e4a] text-white text-xs uppercase font-semibold tracking-wider">
-                        <th className="px-6 py-4">Employee ID</th>
+                        <th className="px-6 py-4">Employee ID No.</th>
                         <th className="px-6 py-4">Employee Name</th>
                         <th className="px-6 py-4">Position</th>
                         <th className="px-6 py-4">Department</th>
                         <th className="px-6 py-4">Contact No.</th>
                         <th className="px-6 py-4">Email Address</th>
-                        <th className="px-6 py-4">Base Rate</th>
+                        <th className="px-6 py-4">Basic Salary</th>
                         <th className="px-6 py-4">Status</th>
                         <th className="px-6 py-4 text-center">Actions</th>
                       </tr>
@@ -1995,8 +1994,19 @@ export default function Home() {
                           <tr key={e.id} className="border-b border-[#e2efe9] hover:bg-[#f5fbf9] transition-colors">
                             <td className="px-6 py-4 font-mono font-bold text-[#2baf9a]">{e.id}</td>
                             <td className="px-6 py-4 flex items-center gap-3">
-                              <div className="w-[38px] h-[38px] rounded-full border border-[#2baf9a] bg-[#eef7f4] flex items-center justify-center shrink-0">
-                                <UserRound className="w-5 h-5 text-[#2baf9a]" aria-label="Employee account" />
+                              <div className="w-[38px] h-[38px] rounded-full border border-[#2baf9a] bg-[#eef7f4] flex items-center justify-center shrink-0 overflow-hidden">
+                                {e.profile_pic ? (
+                                  <Image
+                                    src={e.profile_pic}
+                                    alt={`${e.name} profile`}
+                                    width={38}
+                                    height={38}
+                                    unoptimized
+                                    className="h-full w-full object-cover"
+                                  />
+                                ) : (
+                                  <UserRound className="w-5 h-5 text-[#2baf9a]" aria-label="Employee account" />
+                                )}
                               </div>
                               <div className="font-bold text-[#0f3b2c]">{e.name}</div>
                             </td>
@@ -2120,7 +2130,7 @@ export default function Home() {
                     </div>
 
                     <div>
-                      <label className="block text-xs font-bold text-[#0f3b2c] uppercase tracking-wider mb-2">Employee ID</label>
+                      <label className="block text-xs font-bold text-[#0f3b2c] uppercase tracking-wider mb-2">Employee ID No.</label>
                       <input type="text" className="w-full p-3 text-sm border border-[#dcf1ec] rounded-2xl bg-[#eef7f4] font-mono font-bold text-[#2baf9a]" value={payrollForm.employee_id} readOnly />
                     </div>
 
@@ -2339,8 +2349,8 @@ export default function Home() {
                   <div className="flex items-center gap-2 flex-wrap justify-end">
                     <input
                       type="search"
-                      aria-label="Search salary records by employee ID or name"
-                      placeholder="Search employee ID or name"
+                      aria-label="Search salary records by employee ID no. or name"
+                      placeholder="Search employee ID no. or name"
                       className="w-full sm:w-52 px-3 py-2 bg-[#eef7f4] border-0 rounded-full text-xs focus:ring-1 focus:ring-[#2baf9a] focus:outline-none"
                       value={payrollSearch}
                       onChange={e => setPayrollSearch(e.target.value)}
@@ -2789,11 +2799,11 @@ export default function Home() {
               <form onSubmit={handleSaveEmployee} className="p-6 space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Employee ID</label>
+                    <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Employee ID No.</label>
                     <input
                       type="text"
                       className="w-full p-3 text-sm border border-[#dcf1ec] rounded-xl bg-[#f5fbf9] focus:outline-none focus:ring-1 focus:ring-[#2baf9a]"
-                        placeholder="Enter exact school employee ID"
+                        placeholder="Enter exact school employee ID no."
                         value={empModalForm.id}
                       onChange={e => setEmpModalForm({ ...empModalForm, id: e.target.value })}
                       required
