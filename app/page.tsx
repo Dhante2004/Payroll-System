@@ -77,6 +77,7 @@ interface PayrollRecord {
   employeeUid?: string;
   employee_id: string;
   name: string;
+  position?: string;
   department: string;
   basic_salary: number;
   allowance: number;
@@ -517,7 +518,7 @@ export default function Home() {
 
   // Employee Search
   const [empSearch, setEmpSearch] = useState('');
-  const [employeeSort, setEmployeeSort] = useState<'id' | 'name' | 'department'>('name');
+  const [employeeSort, setEmployeeSort] = useState<'id' | 'name' | 'position' | 'department'>('name');
   const [payrollSearch, setPayrollSearch] = useState('');
   const [payrollMonth, setPayrollMonth] = useState('');
   const [payrollYear, setPayrollYear] = useState('');
@@ -574,7 +575,7 @@ export default function Home() {
     setProfileForm({
       name: user.name,
       position: user.position,
-      department: user.department,
+      department: user.role === 'admin' ? 'Cashier' : user.department,
       email: user.email,
       contact: user.contact || '',
       profile_pic: user.profile_pic || ''
@@ -850,6 +851,7 @@ export default function Home() {
       id: Date.now(),
       employee_id: payrollForm.employee_id,
       name: emp ? emp.name : 'Faculty Staff',
+      position: emp ? emp.position : '',
       department: emp ? emp.department : 'Academic Dept',
       basic_salary: Number(payrollForm.basic_salary),
       allowance: Number(payrollForm.allowance),
@@ -1184,6 +1186,7 @@ export default function Home() {
     worksheet.columns = [
       { header: 'Employee ID', key: 'employeeId', width: 18 },
       { header: 'Employee Name', key: 'name', width: 30 },
+      { header: 'Position', key: 'position', width: 24 },
       { header: 'Department', key: 'department', width: 38 },
       { header: 'Basic Salary', key: 'basicSalary', width: 17 },
       { header: 'Allowance', key: 'allowance', width: 15 },
@@ -1192,7 +1195,7 @@ export default function Home() {
       { header: 'Net Pay', key: 'netPay', width: 17 },
       { header: 'Payroll Date', key: 'payrollDate', width: 17 }
     ];
-    worksheet.autoFilter = 'A1:I1';
+    worksheet.autoFilter = 'A1:J1';
     worksheet.getRow(1).height = 26;
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
     worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F5E4A' } };
@@ -1202,6 +1205,10 @@ export default function Home() {
       const row = worksheet.addRow({
         employeeId: record.employee_id,
         name: record.name,
+        position: record.position || employees.find(employee =>
+          employee.id === record.employee_id ||
+          Boolean(record.employeeUid && (employee.userId === record.employeeUid || employee.uid === record.employeeUid))
+        )?.position || '',
         department: record.department,
         basicSalary: Number(record.basic_salary),
         allowance: Number(record.allowance),
@@ -1217,7 +1224,7 @@ export default function Home() {
           bottom: { style: 'thin', color: { argb: 'FFE2EFE9' } }
         };
       });
-      [4, 5, 6, 7, 8].forEach(columnNumber => {
+      [5, 6, 7, 8, 9].forEach(columnNumber => {
         row.getCell(columnNumber).numFmt = '"₱"#,##0.00';
         row.getCell(columnNumber).alignment = { horizontal: 'right', vertical: 'middle' };
       });
@@ -1256,11 +1263,28 @@ export default function Home() {
     .filter(record => !reportDay || record.payroll_date.slice(8, 10) === reportDay)
     .sort((first, second) => second.payroll_date.localeCompare(first.payroll_date));
   const displayedEmployees = employees
-    .filter(employee => employee.name.toLowerCase().includes(empSearch.toLowerCase()) || employee.id.toLowerCase().includes(empSearch.toLowerCase()))
+    .filter(employee => {
+      const query = empSearch.trim().toLowerCase();
+      if (!query) return true;
+      const searchableValues = [
+        employee.id,
+        employee.name,
+        employee.position,
+        employee.department,
+        employee.contact,
+        employee.email,
+        employee.role,
+        employee.approved === false ? 'pending approval' : employee.role === 'admin' ? 'admin' : 'approved',
+        employee.salary_rate,
+        Number(employee.salary_rate).toLocaleString('en-US', { minimumFractionDigits: 2 })
+      ];
+      return searchableValues.some(value => String(value ?? '').toLowerCase().includes(query));
+    })
     .sort((first, second) => {
-      if (employeeSort === 'name') return first.name.localeCompare(second.name);
-      if (employeeSort === 'department') return first.department.localeCompare(second.department) || first.name.localeCompare(second.name);
-      return first.id.localeCompare(second.id);
+      const firstValue = first[employeeSort];
+      const secondValue = second[employeeSort];
+      return firstValue.localeCompare(secondValue, undefined, { numeric: true, sensitivity: 'base' }) ||
+        first.name.localeCompare(second.name, undefined, { sensitivity: 'base' });
     });
   const totalPayslips = filteredRecords.length;
   const totalPayrollSum = filteredRecords.reduce((acc, curr) => acc + Number(curr.net_pay || 0), 0);
@@ -1763,12 +1787,16 @@ export default function Home() {
         {/* Header */}
         <header className="min-h-16 bg-gradient-to-r from-[#0f3e38] to-[#1a665a] flex items-center justify-between gap-3 px-4 py-3 shadow-md shrink-0 text-white sm:px-6 lg:h-20 lg:px-10">
           <div className="min-w-0">
-            <h2 className="text-white font-bold text-base tracking-tight sm:text-xl truncate">
-              {currentUser.role === 'admin' ? 'Welcome, Admin!' : 'Welcome, Employee!'}
-            </h2>
-            <p className="text-[#2baf9a] text-[10px] sm:text-xs font-medium truncate">
-              {currentUser.name}
-            </p>
+            {activeView === 'dashboard' && (
+              <h2 className="text-white font-bold text-base tracking-tight sm:text-xl truncate">
+                {currentUser.role === 'admin' ? 'Welcome, Admin!' : 'Welcome, Employee!'}
+              </h2>
+            )}
+            {activeView === 'dashboard' && (
+              <p className="text-[#2baf9a] text-[10px] sm:text-xs font-medium truncate">
+                {currentUser.name}
+              </p>
+            )}
           </div>
 
           <div className="flex items-center gap-3">
@@ -1929,7 +1957,8 @@ export default function Home() {
                       <Search className="w-4 h-4 absolute left-3.5 top-3 text-gray-400" />
                       <input
                         type="text"
-                        placeholder="Search employees..."
+                        placeholder="Search all employee details..."
+                        aria-label="Search employees by ID, name, position, department, contact, email, salary, or status"
                         className="pl-10 pr-4 py-2 bg-[#eef7f4] border-0 rounded-full text-xs w-56 focus:ring-1 focus:ring-[#2baf9a] focus:outline-none"
                         value={empSearch}
                         onChange={e => setEmpSearch(e.target.value)}
@@ -1939,10 +1968,11 @@ export default function Home() {
                       aria-label="Sort employees"
                       className="px-3 py-2 bg-[#eef7f4] border-0 rounded-full text-xs focus:ring-1 focus:ring-[#2baf9a] focus:outline-none"
                       value={employeeSort}
-                      onChange={e => setEmployeeSort(e.target.value as 'id' | 'name' | 'department')}
+                      onChange={e => setEmployeeSort(e.target.value as 'id' | 'name' | 'position' | 'department')}
                     >
                       <option value="name">Sort by Name (A-Z)</option>
                       <option value="id">Sort by ID</option>
+                      <option value="position">Sort by Position</option>
                       <option value="department">Sort by Department</option>
                     </select>
                     <motion.button
@@ -2393,6 +2423,7 @@ export default function Home() {
                       <tr className="bg-[#1f5e4a] text-white text-xs uppercase font-semibold tracking-wider">
                         <th className="px-6 py-4">Employee ID No.</th>
                         <th className="px-6 py-4">Employee&apos;s Name</th>
+                        <th className="px-6 py-4">Position</th>
                         <th className="px-6 py-4">Department</th>
                         <th className="px-6 py-4">Basic Salary</th>
                         <th className="px-6 py-4">Allowance</th>
@@ -2401,7 +2432,7 @@ export default function Home() {
                         <th className="px-6 py-4">Net Pay</th>
                         <th className="px-6 py-4">Date</th>
                         <th className="px-6 py-4 text-center">Payslip</th>
-                        {currentUser.role === 'admin' && <th className="px-6 py-4 text-center">Manage</th>}
+                        {currentUser.role === 'admin' && <th className="px-6 py-4 text-center">Actions</th>}
                       </tr>
                     </thead>
                     <tbody className="text-sm">
@@ -2411,6 +2442,10 @@ export default function Home() {
                           <td className="px-6 py-4">
                             <div className="font-bold text-[#0f3b2c]">{p.name}</div>
                           </td>
+                          <td className="px-6 py-4 text-gray-600">{p.position || employees.find(employee =>
+                            employee.id === p.employee_id ||
+                            Boolean(p.employeeUid && (employee.userId === p.employeeUid || employee.uid === p.employeeUid))
+                          )?.position || ''}</td>
                           <td className="px-6 py-4 text-gray-600">{p.department}</td>
                           <td className="px-6 py-4 font-medium">₱{p.basic_salary.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
                           <td className="px-6 py-4 text-[#2baf9a] font-medium">+₱{p.allowance.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
@@ -2531,7 +2566,7 @@ export default function Home() {
                   </div>
 
                   <div className="bg-[#f5fbf9] p-6 rounded-2xl border border-[#dcf1ec]">
-                    <div className="text-[10px] font-bold text-red-500 uppercase tracking-wider">Total Statutory Deductions</div>
+                    <div className="text-[10px] font-bold text-red-500 uppercase tracking-wider">Total Deductions</div>
                     <div className="text-2xl font-black text-red-600 mt-1">
                       ₱{reportRecords.reduce((a, b) => a + Number(b.total_deduction || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </div>
@@ -2551,6 +2586,7 @@ export default function Home() {
                       <tr className="bg-[#1f5e4a] text-white text-xs uppercase font-semibold tracking-wider">
                         <th className="px-6 py-4">Employee ID No.</th>
                         <th className="px-6 py-4">Employee&apos;s Name</th>
+                        <th className="px-6 py-4">Position</th>
                         <th className="px-6 py-4">Department</th>
                         <th className="px-6 py-4">Basic Salary</th>
                         <th className="px-6 py-4">Allowance</th>
@@ -2568,6 +2604,10 @@ export default function Home() {
                           <td className="px-6 py-4">
                             <div className="font-bold text-[#0f3b2c]">{p.name}</div>
                           </td>
+                          <td className="px-6 py-4 text-gray-600">{p.position || employees.find(employee =>
+                            employee.id === p.employee_id ||
+                            Boolean(p.employeeUid && (employee.userId === p.employeeUid || employee.uid === p.employeeUid))
+                          )?.position || ''}</td>
                           <td className="px-6 py-4 text-gray-600">{p.department}</td>
                           <td className="px-6 py-4 font-medium">₱{p.basic_salary.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
                           <td className="px-6 py-4 text-[#2baf9a] font-medium">+₱{p.allowance.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
@@ -2672,7 +2712,9 @@ export default function Home() {
                       onChange={e => setProfileForm({ ...profileForm, department: e.target.value })}
                       required
                     >
-                      {departments.map(department => <option key={department} value={department}>{department}</option>)}
+                      {currentUser?.role === 'admin'
+                        ? <option value="Cashier">Cashier</option>
+                        : departments.map(department => <option key={department} value={department}>{department}</option>)}
                     </select>
                   </div>
 
@@ -2820,17 +2862,6 @@ export default function Home() {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Department</label>
-                    <select
-                      className="w-full p-3 text-sm border border-[#dcf1ec] rounded-xl bg-[#f5fbf9] focus:outline-none focus:ring-1 focus:ring-[#2baf9a]"
-                      value={empModalForm.department}
-                      onChange={e => setEmpModalForm({ ...empModalForm, department: e.target.value })}
-                      required
-                    >
-                      {departments.map(department => <option key={department} value={department}>{department}</option>)}
-                    </select>
-                  </div>
-                  <div>
                     <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Position</label>
                     <select
                       className="w-full p-3 text-sm border border-[#dcf1ec] rounded-xl bg-[#f5fbf9] focus:outline-none focus:ring-1 focus:ring-[#2baf9a]"
@@ -2839,6 +2870,17 @@ export default function Home() {
                       required
                     >
                       {positions.map(position => <option key={position} value={position}>{position}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Department</label>
+                    <select
+                      className="w-full p-3 text-sm border border-[#dcf1ec] rounded-xl bg-[#f5fbf9] focus:outline-none focus:ring-1 focus:ring-[#2baf9a]"
+                      value={empModalForm.department}
+                      onChange={e => setEmpModalForm({ ...empModalForm, department: e.target.value })}
+                      required
+                    >
+                      {departments.map(department => <option key={department} value={department}>{department}</option>)}
                     </select>
                   </div>
                 </div>

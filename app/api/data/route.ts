@@ -74,7 +74,7 @@ export async function PATCH(request: NextRequest) {
     const profile = body.profile || {};
     const name = String(profile.name || '').trim();
     const position = String(profile.position || '').trim();
-    const department = String(profile.department || '').trim();
+    const department = session.role === 'admin' ? 'Cashier' : String(profile.department || '').trim();
     const email = String(profile.email || '').trim().toLowerCase();
     const contact = String(profile.contact || '').trim();
     const profilePic = String(profile.profile_pic || '');
@@ -116,14 +116,14 @@ export async function PATCH(request: NextRequest) {
           id: session.employeeId,
           name: 'Cashier',
           position: 'Cashier',
-          department: 'Finance & HR',
           contact: '09171234567',
           email: session.email,
           profile_pic: undefined,
           role: session.role,
           approved: true,
           salary_rate: 65000,
-          ...(savedProfile || {})
+          ...(savedProfile || {}),
+          department: 'Cashier'
         }
       });
     }
