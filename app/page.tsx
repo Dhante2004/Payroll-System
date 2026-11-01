@@ -519,10 +519,8 @@ export default function Home() {
   // Employee Search
   const [empSearch, setEmpSearch] = useState('');
   const [employeeSort, setEmployeeSort] = useState<'id' | 'name' | 'position' | 'department'>('name');
-  const [payrollSearch, setPayrollSearch] = useState('');
-  const [payrollMonth, setPayrollMonth] = useState('');
-  const [payrollYear, setPayrollYear] = useState('');
-  const [payrollDay, setPayrollDay] = useState('');
+  const [payrollDate, setPayrollDate] = useState('');
+  const [payrollSort, setPayrollSort] = useState<'newest' | 'oldest'>('newest');
   const [reportMonth, setReportMonth] = useState('');
   const [reportDay, setReportDay] = useState('');
   const [isReportCalendarOpen, setIsReportCalendarOpen] = useState(false);
@@ -975,9 +973,10 @@ export default function Home() {
     }
   };
 
-  const handleDownloadPayslip = (employeeId: string) => {
+  const handleDownloadPayslip = (employee: Employee) => {
+    const employeeUserIds = [employee.userId, employee.uid, employee.mongoId].filter(Boolean);
     const latestPayroll = payrollRecords
-      .filter(record => record.employee_id === employeeId)
+      .filter(record => record.employee_id === employee.id || Boolean(record.employeeUid && employeeUserIds.includes(record.employeeUid)))
       .sort((first, second) => second.payroll_date.localeCompare(first.payroll_date))[0];
     if (!latestPayroll) {
       alert('No payslip is available for this employee yet.');
@@ -1250,14 +1249,11 @@ export default function Home() {
     )
     : payrollRecords;
   const displayedPayrollRecords = filteredRecords
-    .filter(record => {
-      const query = payrollSearch.trim().toLowerCase();
-      return !query || record.employee_id.toLowerCase().includes(query) || record.name.toLowerCase().includes(query);
-    })
-    .filter(record => !payrollMonth || record.payroll_date.startsWith(payrollMonth))
-    .filter(record => !payrollYear || record.payroll_date.startsWith(`${payrollYear}-`))
-    .filter(record => !payrollDay || record.payroll_date.slice(8, 10) === payrollDay)
-    .sort((first, second) => second.payroll_date.localeCompare(first.payroll_date));
+    .filter(record => !payrollDate || record.payroll_date === payrollDate)
+    .sort((first, second) => {
+      const dateOrder = first.payroll_date.localeCompare(second.payroll_date);
+      return payrollSort === 'newest' ? -dateOrder : dateOrder;
+    });
   const reportRecords = payrollRecords
     .filter(record => !reportMonth || record.payroll_date.startsWith(reportMonth))
     .filter(record => !reportDay || record.payroll_date.slice(8, 10) === reportDay)
@@ -1768,9 +1764,6 @@ export default function Home() {
                 </div>
               )}
               <div className="overflow-hidden">
-                <p className="text-[10px] text-[#2baf9a] uppercase font-bold tracking-widest leading-none mb-1">
-                  {currentUser.role === 'admin' ? 'Admin Account' : 'Faculty Member'}
-                </p>
                 <p className="text-sm text-white font-medium truncate">{currentUser.name}</p>
                 <p className="text-xs text-white/40 truncate">{currentUser.position || (currentUser.role === 'admin' ? 'Finance Controller' : 'Instructor')}</p>
               </div>
@@ -1896,6 +1889,7 @@ export default function Home() {
                           <th className="px-6 py-4 font-semibold text-xs uppercase tracking-wider">Gross Pay</th>
                           <th className="px-6 py-4 font-semibold text-xs uppercase tracking-wider">Deductions</th>
                           <th className="px-6 py-4 font-semibold text-xs uppercase tracking-wider">Net Pay</th>
+                          <th className="px-6 py-4 font-semibold text-xs uppercase tracking-wider">Date</th>
                           <th className="px-8 py-4 font-semibold text-xs uppercase tracking-wider text-center">Status</th>
                           <th className="px-6 py-4 font-semibold text-xs uppercase tracking-wider text-center">Action</th>
                         </tr>
@@ -1913,6 +1907,7 @@ export default function Home() {
                               <td className="px-6 py-4 font-medium">₱{p.gross_pay.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
                               <td className="px-6 py-4 font-medium text-red-600">₱{p.total_deduction.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
                               <td className="px-6 py-4 font-bold text-[#0f3b2c]">₱{p.net_pay.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                              <td className="px-6 py-4 text-gray-500 text-xs">{formatPayrollDate(p.payroll_date)}</td>
                               <td className="px-8 py-4 text-center">
                                 <span className="bg-[#2baf9a]/10 text-[#2baf9a] text-[10px] px-3 py-1 rounded-full font-bold uppercase">PAID</span>
                               </td>
@@ -2087,7 +2082,7 @@ export default function Home() {
                                 <motion.button
                                   whileHover={{ scale: 1.1 }}
                                   whileTap={{ scale: 0.9 }}
-                                  onClick={() => handleDownloadPayslip(e.id)}
+                                  onClick={() => handleDownloadPayslip(e)}
                                   className="p-2 rounded-lg bg-[#eef7f4] hover:bg-[#2baf9a] hover:text-white text-[#0f3b2c] transition cursor-pointer"
                                   title="Download latest payslip"
                                 >
@@ -2375,45 +2370,21 @@ export default function Home() {
 
                   <div className="flex items-center gap-2 flex-wrap justify-end">
                     <input
-                      type="search"
-                      aria-label="Search salary records by employee ID no. or name"
-                      placeholder="Search employee ID no. or name"
-                      className="w-full sm:w-52 px-3 py-2 bg-[#eef7f4] border-0 rounded-full text-xs focus:ring-1 focus:ring-[#2baf9a] focus:outline-none"
-                      value={payrollSearch}
-                      onChange={e => setPayrollSearch(e.target.value)}
-                    />
-                    <input
-                      type="month"
-                      aria-label="Filter payroll by month"
+                      type="date"
+                      aria-label="Filter payroll by date"
                       className="px-3 py-2 bg-[#eef7f4] border-0 rounded-full text-xs focus:ring-1 focus:ring-[#2baf9a] focus:outline-none"
-                      value={payrollMonth}
-                      onChange={e => {
-                        const month = e.target.value;
-                        setPayrollMonth(month);
-                        if (payrollDay && Number(payrollDay) > getDaysInMonth(month)) setPayrollDay('');
-                      }}
+                      value={payrollDate}
+                      onChange={e => setPayrollDate(e.target.value)}
                     />
                     <select
-                      aria-label="Filter payroll by day of month"
+                      aria-label="Sort payroll records by date"
                       className="px-3 py-2 bg-[#eef7f4] border-0 rounded-full text-xs focus:ring-1 focus:ring-[#2baf9a] focus:outline-none"
-                      value={payrollDay}
-                      onChange={e => setPayrollDay(e.target.value)}
+                      value={payrollSort}
+                      onChange={e => setPayrollSort(e.target.value as 'newest' | 'oldest')}
                     >
-                      <option value="">All days</option>
-                      {Array.from({ length: getDaysInMonth(payrollMonth) }, (_, index) => String(index + 1).padStart(2, '0')).map(day => (
-                        <option key={day} value={day}>Day {Number(day)}</option>
-                      ))}
+                      <option value="newest">New-Old</option>
+                      <option value="oldest">Old-New</option>
                     </select>
-                    <input
-                      type="number"
-                      min="2000"
-                      max="2100"
-                      placeholder="Year"
-                      aria-label="Filter payroll by year"
-                      className="w-20 px-3 py-2 bg-[#eef7f4] border-0 rounded-full text-xs focus:ring-1 focus:ring-[#2baf9a] focus:outline-none"
-                      value={payrollYear}
-                      onChange={e => setPayrollYear(e.target.value)}
-                    />
                   </div>
                 </div>
 
