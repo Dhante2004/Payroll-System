@@ -2409,7 +2409,7 @@ export default function Home() {
                     <input
                       type="date"
                       aria-label="Filter payroll by date"
-                      className="px-3 py-2 bg-[#eef7f4] border-0 rounded-full text-xs focus:ring-1 focus:ring-[#2baf9a] focus:outline-none"
+                      className="min-w-0 px-3 py-2 bg-[#eef7f4] border-0 rounded-full text-xs focus:ring-1 focus:ring-[#2baf9a] focus:outline-none"
                       value={payrollDate}
                       onChange={e => setPayrollDate(e.target.value)}
                     />
@@ -2725,8 +2725,8 @@ export default function Home() {
                       <input
                         type="email"
                         value={profileForm.email}
-                        onChange={e => setProfileForm({ ...profileForm, email: e.target.value })}
-                        className="w-full p-3 text-sm border border-[#dcf1ec] rounded-xl bg-[#f5fbf9]"
+                        readOnly
+                        className="w-full p-3 text-sm border border-[#dcf1ec] rounded-xl bg-gray-100 text-gray-500 cursor-not-allowed"
                         required
                       />
                     </div>
@@ -2735,8 +2735,8 @@ export default function Home() {
                       <input
                         type="tel"
                         value={profileForm.contact}
-                        onChange={e => setProfileForm({ ...profileForm, contact: e.target.value })}
-                        className="w-full p-3 text-sm border border-[#dcf1ec] rounded-xl bg-[#f5fbf9]"
+                        readOnly
+                        className="w-full p-3 text-sm border border-[#dcf1ec] rounded-xl bg-gray-100 text-gray-500 cursor-not-allowed"
                         required
                       />
                     </div>
