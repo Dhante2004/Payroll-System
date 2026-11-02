@@ -519,6 +519,8 @@ export default function Home() {
   // Employee Search
   const [empSearch, setEmpSearch] = useState('');
   const [employeeSort, setEmployeeSort] = useState<'id' | 'name' | 'position' | 'department'>('name');
+  const [payrollStatusSearch, setPayrollStatusSearch] = useState('');
+  const [payrollSearch, setPayrollSearch] = useState('');
   const [payrollDate, setPayrollDate] = useState('');
   const [payrollSort, setPayrollSort] = useState<'newest' | 'oldest'>('newest');
   const [reportMonth, setReportMonth] = useState('');
@@ -914,22 +916,6 @@ export default function Home() {
     }
   };
 
-  const handleDeletePayrollRecord = async (record: PayrollRecord) => {
-    if (!record._id || !confirm(`Delete the payroll record for ${record.name} dated ${record.payroll_date}?`)) return;
-    try {
-      const response = await fetch('/api/data', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'payroll', mongoId: record._id })
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.message);
-      setPayrollRecords(prev => prev.filter(item => item._id !== record._id));
-    } catch (error) {
-      alert(error instanceof Error ? error.message : 'Unable to delete the payroll record.');
-    }
-  };
-
   const handleSaveEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -990,23 +976,26 @@ export default function Home() {
     const pageWidth = pdf.internal.pageSize.getWidth();
     const margin = 18;
     const formatMoney = (amount: number) => `PHP ${Number(amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     let y = 20;
 
-    try {
-      const logoResponse = await fetch('/mit-seal.png');
-      if (logoResponse.ok) {
-        const logoBlob = await logoResponse.blob();
-        const logoData = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(String(reader.result));
-          reader.onerror = () => reject(new Error('Unable to load the school logo.'));
-          reader.readAsDataURL(logoBlob);
-        });
-        pdf.addImage(logoData, 'PNG', pageWidth / 2 - 9, 7, 18, 18);
-        y = 31;
+    if (!isMobile) {
+      try {
+        const logoResponse = await fetch('/mit-seal.png');
+        if (logoResponse.ok) {
+          const logoBlob = await logoResponse.blob();
+          const logoData = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result));
+            reader.onerror = () => reject(new Error('Unable to load the school logo.'));
+            reader.readAsDataURL(logoBlob);
+          });
+          pdf.addImage(logoData, 'PNG', pageWidth / 2 - 9, 7, 18, 18);
+          y = 31;
+        }
+      } catch (error) {
+        console.error('Unable to add the school logo to the payslip PDF:', error);
       }
-    } catch (error) {
-      console.error('Unable to add the school logo to the payslip PDF:', error);
     }
 
     pdf.setFont('helvetica', 'bold');
@@ -1114,7 +1103,36 @@ export default function Home() {
     pdf.text(`Date: ${formatPayrollDate(record.payroll_date)}`, pageWidth / 2 + 10, y + 23);
 
     const safeEmployeeId = record.employee_id.replace(/[^a-zA-Z0-9-_]/g, '_');
-    pdf.save(`MIT_Payslip_${safeEmployeeId}_${record.payroll_date}.pdf`);
+    const fileName = `MIT_Payslip_${safeEmployeeId}_${record.payroll_date}.pdf`;
+    if (!isMobile) {
+      pdf.save(fileName);
+      return;
+    }
+
+    const blob = pdf.output('blob');
+    const file = new File([blob], fileName, { type: 'application/pdf' });
+    if (navigator.canShare?.({ files: [file] }) && navigator.share) {
+      try {
+        await navigator.share({ files: [file], title: 'Payslip' });
+        return;
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+      }
+    }
+
+    const pdfUrl = URL.createObjectURL(blob);
+    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (isIOS) {
+      window.open(pdfUrl, '_blank');
+    } else {
+      const link = document.createElement('a');
+      link.href = pdfUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    }
+    window.setTimeout(() => URL.revokeObjectURL(pdfUrl), 60000);
   };
 
   const handleOpenPayslip = (record: PayrollRecord) => {
@@ -1250,6 +1268,19 @@ export default function Home() {
     : payrollRecords;
   const displayedPayrollRecords = filteredRecords
     .filter(record => !payrollDate || record.payroll_date === payrollDate)
+    .filter(record => {
+      const query = payrollSearch.trim().toLowerCase();
+      return currentUser?.role !== 'admin' || !query || Object.values(record).some(value => String(value ?? '').toLowerCase().includes(query));
+    })
+    .sort((first, second) => {
+      const dateOrder = first.payroll_date.localeCompare(second.payroll_date);
+      return payrollSort === 'newest' ? -dateOrder : dateOrder;
+    });
+  const displayedPayrollStatusRecords = filteredRecords
+    .filter(record => {
+      const query = payrollStatusSearch.trim().toLowerCase();
+      return currentUser?.role !== 'admin' || !query || Object.values(record).some(value => String(value ?? '').toLowerCase().includes(query));
+    })
     .sort((first, second) => {
       const dateOrder = first.payroll_date.localeCompare(second.payroll_date);
       return payrollSort === 'newest' ? -dateOrder : dateOrder;
@@ -1792,20 +1823,6 @@ export default function Home() {
             )}
           </div>
 
-          <div className="flex items-center gap-3">
-            {currentUser.role === 'admin' && (
-              <button
-                onClick={() => {
-                  handleResetPayrollForm();
-                  setActiveView('process-payroll');
-                }}
-                className="px-3 py-2 sm:px-6 sm:py-2.5 bg-[#f1c40f] text-[#0f3b2c] font-bold text-xs sm:text-sm rounded-full shadow-lg shadow-yellow-500/20 hover:bg-yellow-400 active:scale-95 transition flex items-center gap-2 shrink-0"
-              >
-                <Plus className="w-4 h-4" />
-                <span>New Payroll</span>
-              </button>
-            )}
-          </div>
         </header>
 
         {/* Content Body */}
@@ -1871,13 +1888,25 @@ export default function Home() {
                   <div className="px-4 py-4 sm:px-6 lg:px-8 border-b border-[#e2efe9] flex flex-wrap justify-between items-center gap-3 bg-[#fcfdfd]">
                     <h3 className="font-bold text-[#0f3e38]">Employee Payroll Status</h3>
                     <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        placeholder="Search records..."
-                        className="bg-[#eef7f4] border-0 rounded-full text-xs px-4 py-2 w-full sm:w-48 focus:ring-1 focus:ring-[#2baf9a] focus:outline-none"
-                        value={empSearch}
-                        onChange={e => setEmpSearch(e.target.value)}
-                      />
+                      {currentUser.role === 'admin' && (
+                        <input
+                          type="search"
+                          placeholder="Search payroll records..."
+                          aria-label="Search payroll by ID, name, department, or other record details"
+                          className="bg-[#eef7f4] border-0 rounded-full text-xs px-4 py-2 w-full sm:w-56 focus:ring-1 focus:ring-[#2baf9a] focus:outline-none"
+                          value={payrollStatusSearch}
+                          onChange={e => setPayrollStatusSearch(e.target.value)}
+                        />
+                      )}
+                      <select
+                        aria-label="Sort payroll records by date"
+                        className="px-3 py-2 bg-[#eef7f4] border-0 rounded-full text-xs focus:ring-1 focus:ring-[#2baf9a] focus:outline-none"
+                        value={payrollSort}
+                        onChange={e => setPayrollSort(e.target.value as 'newest' | 'oldest')}
+                      >
+                        <option value="newest">New-Old</option>
+                        <option value="oldest">Old-New</option>
+                      </select>
                     </div>
                   </div>
                   <div className="flex-1 overflow-x-auto">
@@ -1891,13 +1920,11 @@ export default function Home() {
                           <th className="px-6 py-4 font-semibold text-xs uppercase tracking-wider">Net Pay</th>
                           <th className="px-6 py-4 font-semibold text-xs uppercase tracking-wider">Date</th>
                           <th className="px-8 py-4 font-semibold text-xs uppercase tracking-wider text-center">Status</th>
-                          <th className="px-6 py-4 font-semibold text-xs uppercase tracking-wider text-center">Action</th>
+                          <th className="px-6 py-4 font-semibold text-xs uppercase tracking-wider text-center">Payslip</th>
                         </tr>
                       </thead>
                       <tbody className="text-sm">
-                        {filteredRecords
-                          .filter(p => p.name.toLowerCase().includes(empSearch.toLowerCase()) || p.employee_id.toLowerCase().includes(empSearch.toLowerCase()))
-                          .map(p => (
+                        {displayedPayrollStatusRecords.map(p => (
                             <tr key={p.id} className="border-b border-[#e2efe9] hover:bg-[#f5fbf9] transition-colors">
                               <td className="px-8 py-4 font-mono font-bold text-[#2baf9a]">{p.employee_id}</td>
                               <td className="px-6 py-4">
@@ -2369,6 +2396,16 @@ export default function Home() {
                   </div>
 
                   <div className="flex items-center gap-2 flex-wrap justify-end">
+                    {currentUser.role === 'admin' && (
+                      <input
+                        type="search"
+                        aria-label="Search salary records by ID, name, department, or other record details"
+                        placeholder="Search ID, name, department..."
+                        className="w-full sm:w-56 px-3 py-2 bg-[#eef7f4] border-0 rounded-full text-xs focus:ring-1 focus:ring-[#2baf9a] focus:outline-none"
+                        value={payrollSearch}
+                        onChange={e => setPayrollSearch(e.target.value)}
+                      />
+                    )}
                     <input
                       type="date"
                       aria-label="Filter payroll by date"
@@ -2403,7 +2440,7 @@ export default function Home() {
                         <th className="px-6 py-4">Net Pay</th>
                         <th className="px-6 py-4">Date</th>
                         <th className="px-6 py-4 text-center">Payslip</th>
-                        {currentUser.role === 'admin' && <th className="px-6 py-4 text-center">Actions</th>}
+                        {currentUser.role === 'admin' && <th className="px-6 py-4 text-center">Edit</th>}
                       </tr>
                     </thead>
                     <tbody className="text-sm">
@@ -2444,13 +2481,6 @@ export default function Home() {
                                   title="Edit payroll record"
                                 >
                                   <PenSquare className="w-4 h-4" />
-                                </button>
-                                <button
-                                  onClick={() => handleDeletePayrollRecord(p)}
-                                  className="p-2 bg-red-50 hover:bg-red-600 hover:text-white text-red-700 rounded-xl transition cursor-pointer"
-                                  title="Delete payroll record"
-                                >
-                                  <Trash2 className="w-4 h-4" />
                                 </button>
                               </div>
                             </td>
