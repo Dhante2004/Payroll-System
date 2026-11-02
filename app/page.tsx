@@ -1390,7 +1390,7 @@ export default function Home() {
                       <input
                         type="text"
                         className="w-full px-5 py-3.5 text-sm border-2 border-emerald-100 rounded-2xl bg-[#f5fbf9] focus:outline-none focus:border-[#2baf9a] focus:bg-white transition"
-                        placeholder="e.g. EMP-2026-001 or employee@gmail.com"
+                        placeholder="e.g. F-26-001 or employee@gmail.com"
                         value={loginUser}
                         onChange={e => setLoginUser(e.target.value)}
                         required
