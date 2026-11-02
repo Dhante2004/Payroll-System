@@ -405,7 +405,7 @@ export default function Home() {
       id: 'Admin001',
       name: 'Cashier',
       position: 'Cashier',
-      department: 'Finance & HR',
+      department: 'Finance Office',
       contact: '09171234567',
       email: 'admin@mit.edu.ph',
       salary_rate: 65000.00,
@@ -575,7 +575,7 @@ export default function Home() {
     setProfileForm({
       name: user.name,
       position: user.position,
-      department: user.role === 'admin' ? 'Cashier' : user.department,
+      department: user.role === 'admin' ? 'Finance Office' : user.department,
       email: user.email,
       contact: user.contact || '',
       profile_pic: user.profile_pic || ''
@@ -773,19 +773,30 @@ export default function Home() {
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const response = await fetch('/api/data', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'profile',
-          profile: {
+      const editableProfile = currentUser?.role === 'employee'
+        ? {
+            name: currentUser.name,
+            position: currentUser.position,
+            department: currentUser.department,
+            email: currentUser.email,
+            contact: currentUser.contact || '',
+            profile_pic: profilePhoto || currentUser.profile_pic || undefined
+          }
+        : {
             name: profileForm.name,
             position: profileForm.position,
             department: profileForm.department,
             email: profileForm.email,
             contact: profileForm.contact,
             profile_pic: profilePhoto || undefined
-          }
+          };
+
+      const response = await fetch('/api/data', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'profile',
+          profile: editableProfile
         })
       });
       const result = await response.json();
@@ -1379,7 +1390,7 @@ export default function Home() {
                       <input
                         type="text"
                         className="w-full px-5 py-3.5 text-sm border-2 border-emerald-100 rounded-2xl bg-[#f5fbf9] focus:outline-none focus:border-[#2baf9a] focus:bg-white transition"
-                        placeholder="e.g. EMP-2026-001 or admin@mit.edu.ph"
+                        placeholder="e.g. EMP-2026-001 or employee@gmail.com"
                         value={loginUser}
                         onChange={e => setLoginUser(e.target.value)}
                         required
@@ -1813,13 +1824,8 @@ export default function Home() {
           <div className="min-w-0">
             {activeView === 'dashboard' && (
               <h2 className="text-white font-bold text-base tracking-tight sm:text-xl truncate">
-                {currentUser.role === 'admin' ? 'Welcome, Admin!' : 'Welcome, Employee!'}
+                {currentUser.role === 'admin' ? 'Welcome, Admin!' : `Welcome, ${currentUser.name}!`}
               </h2>
-            )}
-            {activeView === 'dashboard' && (
-              <p className="text-[#2baf9a] text-[10px] sm:text-xs font-medium truncate">
-                {currentUser.name}
-              </p>
             )}
           </div>
 
@@ -1863,19 +1869,19 @@ export default function Home() {
                   ) : (
                     <>
                       <motion.div whileHover={{ y: -3 }} className="bg-white rounded-[28px] p-6 shadow-sm border border-[#dcf1ec] flex flex-col">
-                        <p className="text-[#2baf9a] text-[10px] uppercase font-bold tracking-wider">Gross Pay</p>
+                        <p className="text-[#2baf9a] text-[10px] uppercase font-bold tracking-wider">Total Gross Pay</p>
                         <p className="text-2xl font-black mt-1 text-[#0f3b2c]">₱{filteredRecords.reduce((sum, record) => sum + Number(record.gross_pay || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
                         <p className="text-xs text-gray-400 mt-auto">Across your payslips</p>
                       </motion.div>
 
                       <motion.div whileHover={{ y: -3 }} className="bg-white rounded-[28px] p-6 shadow-sm border border-[#dcf1ec] flex flex-col">
-                        <p className="text-[#b91c1c] text-[10px] uppercase font-bold tracking-wider">Deductions</p>
+                        <p className="text-[#b91c1c] text-[10px] uppercase font-bold tracking-wider">Total Deductions</p>
                         <p className="text-2xl font-black mt-1 text-[#0f3b2c]">₱{filteredRecords.reduce((sum, record) => sum + Number(record.total_deduction || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
                         <p className="text-xs text-gray-400 mt-auto">Across your payslips</p>
                       </motion.div>
 
                       <motion.div whileHover={{ y: -3 }} className="bg-white rounded-[28px] p-6 shadow-sm border border-[#dcf1ec] flex flex-col">
-                        <p className="text-[#237a6b] text-[10px] uppercase font-bold tracking-wider">Net Pay</p>
+                        <p className="text-[#237a6b] text-[10px] uppercase font-bold tracking-wider">Total Net Pay</p>
                         <p className="text-2xl font-black mt-1 text-[#0f3b2c]">₱{totalPayrollSum.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
                         <p className="text-xs text-gray-400 mt-auto">Your total disbursement</p>
                       </motion.div>
@@ -2440,7 +2446,7 @@ export default function Home() {
                         <th className="px-6 py-4">Net Pay</th>
                         <th className="px-6 py-4">Date</th>
                         <th className="px-6 py-4 text-center">Payslip</th>
-                        {currentUser.role === 'admin' && <th className="px-6 py-4 text-center">Edit</th>}
+                        {currentUser.role === 'admin' && <th className="px-6 py-4 text-center">Action</th>}
                       </tr>
                     </thead>
                     <tbody className="text-sm">
@@ -2687,9 +2693,10 @@ export default function Home() {
                       <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Full Name</label>
                       <input
                         type="text"
-                        className="w-full p-3 text-sm border border-[#dcf1ec] rounded-xl bg-[#f5fbf9]"
+                        className={`w-full p-3 text-sm border border-[#dcf1ec] rounded-xl ${currentUser?.role === 'employee' ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-[#f5fbf9]'}`}
                         value={profileForm.name}
                         onChange={e => setProfileForm({ ...profileForm, name: e.target.value })}
+                        disabled={currentUser?.role === 'employee'}
                         required
                       />
                     </div>
@@ -2697,9 +2704,10 @@ export default function Home() {
                       <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Position</label>
                       <input
                         type="text"
-                        className="w-full p-3 text-sm border border-[#dcf1ec] rounded-xl bg-[#f5fbf9]"
+                        className={`w-full p-3 text-sm border border-[#dcf1ec] rounded-xl ${currentUser?.role === 'employee' ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-[#f5fbf9]'}`}
                         value={profileForm.position}
                         onChange={e => setProfileForm({ ...profileForm, position: e.target.value })}
+                        disabled={currentUser?.role === 'employee'}
                         required
                       />
                     </div>
@@ -2708,13 +2716,14 @@ export default function Home() {
                   <div>
                     <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Department</label>
                     <select
-                      className="w-full p-3 text-sm border border-[#dcf1ec] rounded-xl bg-[#f5fbf9]"
+                      className={`w-full p-3 text-sm border border-[#dcf1ec] rounded-xl ${currentUser?.role === 'employee' ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-[#f5fbf9]'}`}
                       value={profileForm.department}
                       onChange={e => setProfileForm({ ...profileForm, department: e.target.value })}
+                      disabled={currentUser?.role === 'employee'}
                       required
                     >
                       {currentUser?.role === 'admin'
-                        ? <option value="Cashier">Cashier</option>
+                        ? <option value="Finance Office">Finance Office</option>
                         : departments.map(department => <option key={department} value={department}>{department}</option>)}
                     </select>
                   </div>
@@ -2922,7 +2931,7 @@ export default function Home() {
                   </div>
                   {!editingEmpId && (
                     <div>
-                      <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Initial Password</label>
+                      <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Password</label>
                       <input
                         type="password"
                         minLength={6}
