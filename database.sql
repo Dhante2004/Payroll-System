@@ -61,13 +61,5 @@ CREATE TABLE `payroll` (
 -- --------------------------------------------------------
 
 INSERT INTO `employees` (`id`, `name`, `position`, `department`, `contact`, `email`, `password`, `salary_rate`, `role`, `profile_pic`) VALUES
-('Admin001', 'Farida A. Madjilon', 'Chief Finance Officer / Cashier', 'Finance & HR', '09171234567', 'admin@mit.edu.ph', 'admin123', 65000.00, 'admin', 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150'),
-('EMP-2026-001', 'Juan Carlos Dela Cruz', 'Senior IT Instructor', 'College of Computer Studies', '09182345678', 'j.delacruz@mit.edu.ph', 'employee123', 38500.00, 'employee', 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'),
-('EMP-2026-002', 'Maria Santos Reyes', 'Assistant Professor', 'College of Education', '09193456789', 'm.reyes@mit.edu.ph', 'employee123', 32000.00, 'employee', 'https://images.unsplash.com/photo-1580489944761-15a19d654956?w=150'),
-('EMP-2026-003', 'Ahmad Rizal Alih', 'Laboratory Administrator', 'Information Technology', '09204567890', 'a.rizal@mit.edu.ph', 'employee123', 26500.00, 'employee', 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150');
+('Admin001', 'Farida A. Madjilon', 'Chief Finance Officer / Cashier', 'Finance & HR', '09171234567', 'admin@mit.edu.ph', 'admin123', 65000.00, 'admin', 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150');
 
--- Initial Payroll Records
-INSERT INTO `payroll` (`employee_id`, `basic_salary`, `allowance`, `absences`, `cash_advances`, `sss`, `phic`, `pagibig`, `loan_sss`, `loan_pagibig`, `wedding_contribution`, `death_contribution`, `gross_pay`, `total_deduction`, `net_pay`, `payroll_date`) VALUES
-('EMP-2026-001', 38500.00, 3500.00, 350.00, 1000.00, 360.00, 250.00, 200.00, 500.00, 300.00, 100.00, 100.00, 42000.00, 3160.00, 38840.00, '2026-07-15'),
-('EMP-2026-002', 32000.00, 2500.00, 0.00, 0.00, 360.00, 250.00, 200.00, 0.00, 0.00, 100.00, 100.00, 34500.00, 1010.00, 33490.00, '2026-07-15'),
-('EMP-2026-003', 26500.00, 2000.00, 700.00, 500.00, 360.00, 250.00, 200.00, 0.00, 0.00, 100.00, 100.00, 28500.00, 2210.00, 26290.00, '2026-07-15');

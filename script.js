@@ -19,107 +19,10 @@ class MITPayrollApp {
         salary_rate: 65000.00,
         role: 'admin',
         profile_pic: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150'
-      },
-      {
-        id: 'EMP-2026-001',
-        name: 'Juan Carlos Dela Cruz',
-        position: 'Senior IT Instructor',
-        department: 'College of Computer Studies',
-        contact: '09182345678',
-        email: 'j.delacruz@mit.edu.ph',
-        salary_rate: 38500.00,
-        role: 'employee',
-        profile_pic: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'
-      },
-      {
-        id: 'EMP-2026-002',
-        name: 'Maria Santos Reyes',
-        position: 'Assistant Professor',
-        department: 'College of Education',
-        contact: '09193456789',
-        email: 'm.reyes@mit.edu.ph',
-        salary_rate: 32000.00,
-        role: 'employee',
-        profile_pic: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?w=150'
-      },
-      {
-        id: 'EMP-2026-003',
-        name: 'Ahmad Rizal Alih',
-        position: 'Laboratory Administrator',
-        department: 'Information Technology',
-        contact: '09204567890',
-        email: 'a.rizal@mit.edu.ph',
-        salary_rate: 26500.00,
-        role: 'employee',
-        profile_pic: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150'
       }
     ];
 
-    this.payrollRecords = [
-      {
-        id: 101,
-        employee_id: 'EMP-2026-001',
-        name: 'Juan Carlos Dela Cruz',
-        department: 'College of Computer Studies',
-        basic_salary: 38500.00,
-        allowance: 3500.00,
-        absences: 350.00,
-        cash_advances: 1000.00,
-        sss: 360.00,
-        phic: 250.00,
-        pagibig: 200.00,
-        loan_sss: 500.00,
-        loan_pagibig: 300.00,
-        wedding_contribution: 100.00,
-        death_contribution: 100.00,
-        gross_pay: 42000.00,
-        total_deduction: 3160.00,
-        net_pay: 38840.00,
-        payroll_date: '2026-07-15'
-      },
-      {
-        id: 102,
-        employee_id: 'EMP-2026-002',
-        name: 'Maria Santos Reyes',
-        department: 'College of Education',
-        basic_salary: 32000.00,
-        allowance: 2500.00,
-        absences: 0.00,
-        cash_advances: 0.00,
-        sss: 360.00,
-        phic: 250.00,
-        pagibig: 200.00,
-        loan_sss: 0.00,
-        loan_pagibig: 0.00,
-        wedding_contribution: 100.00,
-        death_contribution: 100.00,
-        gross_pay: 34500.00,
-        total_deduction: 1010.00,
-        net_pay: 33490.00,
-        payroll_date: '2026-07-15'
-      },
-      {
-        id: 103,
-        employee_id: 'EMP-2026-003',
-        name: 'Ahmad Rizal Alih',
-        department: 'Information Technology',
-        basic_salary: 26500.00,
-        allowance: 2000.00,
-        absences: 700.00,
-        cash_advances: 500.00,
-        sss: 360.00,
-        phic: 250.00,
-        pagibig: 200.00,
-        loan_sss: 0.00,
-        loan_pagibig: 0.00,
-        wedding_contribution: 100.00,
-        death_contribution: 100.00,
-        gross_pay: 28500.00,
-        total_deduction: 2210.00,
-        net_pay: 26290.00,
-        payroll_date: '2026-07-15'
-      }
-    ];
+    this.payrollRecords = [];
 
     this.editingEmpId = null;
 

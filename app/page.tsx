@@ -69,6 +69,7 @@ interface Employee {
   role: 'admin' | 'employee';
   approved?: boolean;
   profile_pic?: string;
+  createdAt?: string | Date;
 }
 
 interface PayrollRecord {
@@ -411,114 +412,14 @@ export default function Home() {
       salary_rate: 65000.00,
       role: 'admin',
       profile_pic: undefined
-    },
-    {
-      id: 'EMP-2026-001',
-      name: 'Juan Carlos Dela Cruz',
-      position: 'Senior IT Instructor',
-      department: 'College of Computer Studies',
-      contact: '09182345678',
-      email: 'j.delacruz@mit.edu.ph',
-      salary_rate: 38500.00,
-      role: 'employee',
-      profile_pic: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'
-    },
-    {
-      id: 'EMP-2026-002',
-      name: 'Maria Santos Reyes',
-      position: 'Assistant Professor',
-      department: 'College of Education',
-      contact: '09193456789',
-      email: 'm.reyes@mit.edu.ph',
-      salary_rate: 32000.00,
-      role: 'employee',
-      profile_pic: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?w=150'
-    },
-    {
-      id: 'EMP-2026-003',
-      name: 'Ahmad Rizal Alih',
-      position: 'Laboratory Administrator',
-      department: 'Information Technology',
-      contact: '09204567890',
-      email: 'a.rizal@mit.edu.ph',
-      salary_rate: 26500.00,
-      role: 'employee',
-      profile_pic: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150'
     }
   ]);
 
-  const [payrollRecords, setPayrollRecords] = useState<PayrollRecord[]>([
-    {
-      id: 101,
-      employee_id: 'EMP-2026-001',
-      name: 'Juan Carlos Dela Cruz',
-      department: 'College of Computer Studies',
-      basic_salary: 38500.00,
-      allowance: 3500.00,
-      absences: 350.00,
-      late_minutes: 0,
-      cash_advances: 1000.00,
-      sss: 360.00,
-      phic: 250.00,
-      pagibig: 200.00,
-      wtax: 0,
-      loan_sss: 500.00,
-      loan_pagibig: 300.00,
-      other_deductions: 200.00,
-      gross_pay: 42000.00,
-      total_deduction: 3160.00,
-      net_pay: 38840.00,
-      payroll_date: '2026-07-15'
-    },
-    {
-      id: 102,
-      employee_id: 'EMP-2026-002',
-      name: 'Maria Santos Reyes',
-      department: 'College of Education',
-      basic_salary: 32000.00,
-      allowance: 2500.00,
-      absences: 0.00,
-      late_minutes: 0,
-      cash_advances: 0.00,
-      sss: 360.00,
-      phic: 250.00,
-      pagibig: 200.00,
-      wtax: 0,
-      loan_sss: 0.00,
-      loan_pagibig: 0.00,
-      other_deductions: 200.00,
-      gross_pay: 34500.00,
-      total_deduction: 1010.00,
-      net_pay: 33490.00,
-      payroll_date: '2026-07-15'
-    },
-    {
-      id: 103,
-      employee_id: 'EMP-2026-003',
-      name: 'Ahmad Rizal Alih',
-      department: 'Information Technology',
-      basic_salary: 26500.00,
-      allowance: 2000.00,
-      absences: 700.00,
-      late_minutes: 0,
-      cash_advances: 500.00,
-      sss: 360.00,
-      phic: 250.00,
-      pagibig: 200.00,
-      wtax: 0,
-      loan_sss: 0.00,
-      loan_pagibig: 0.00,
-      other_deductions: 200.00,
-      gross_pay: 28500.00,
-      total_deduction: 2210.00,
-      net_pay: 26290.00,
-      payroll_date: '2026-07-15'
-    }
-  ]);
+  const [payrollRecords, setPayrollRecords] = useState<PayrollRecord[]>([]);
 
   // Employee Search
   const [empSearch, setEmpSearch] = useState('');
-  const [employeeSort, setEmployeeSort] = useState<'id' | 'name' | 'position' | 'department'>('name');
+  const [employeeSort, setEmployeeSort] = useState<'newest' | 'id' | 'name' | 'position' | 'department'>('newest');
   const [payrollStatusSearch, setPayrollStatusSearch] = useState('');
   const [payrollSearch, setPayrollSearch] = useState('');
   const [payrollDate, setPayrollDate] = useState('');
@@ -1319,6 +1220,11 @@ export default function Home() {
       return searchableValues.some(value => String(value ?? '').toLowerCase().includes(query));
     })
     .sort((first, second) => {
+      if (employeeSort === 'newest') {
+        const firstCreatedAt = new Date(first.createdAt ?? 0).getTime() || 0;
+        const secondCreatedAt = new Date(second.createdAt ?? 0).getTime() || 0;
+        return secondCreatedAt - firstCreatedAt || first.name.localeCompare(second.name, undefined, { sensitivity: 'base' });
+      }
       const firstValue = first[employeeSort];
       const secondValue = second[employeeSort];
       return firstValue.localeCompare(secondValue, undefined, { numeric: true, sensitivity: 'base' }) ||
@@ -1733,7 +1639,10 @@ export default function Home() {
             {currentUser.role === 'admin' && (
               <>
                 <button
-                  onClick={() => setActiveView('employees')}
+                  onClick={() => {
+                    setEmployeeSort('newest');
+                    setActiveView('employees');
+                  }}
                   className={`w-auto shrink-0 flex items-center gap-2 whitespace-nowrap px-3 py-2 rounded-xl text-xs font-medium transition cursor-pointer lg:w-full lg:gap-3 lg:px-4 lg:py-3 lg:text-sm ${
                     activeView === 'employees' ? 'bg-[#237a6b] text-white shadow-md font-bold' : 'text-white/60 hover:text-white hover:bg-white/5'
                   }`}
@@ -1996,8 +1905,9 @@ export default function Home() {
                       aria-label="Sort employees"
                       className="px-3 py-2 bg-[#eef7f4] border-0 rounded-full text-xs focus:ring-1 focus:ring-[#2baf9a] focus:outline-none"
                       value={employeeSort}
-                      onChange={e => setEmployeeSort(e.target.value as 'id' | 'name' | 'position' | 'department')}
+                      onChange={e => setEmployeeSort(e.target.value as 'newest' | 'id' | 'name' | 'position' | 'department')}
                     >
+                      <option value="newest">Sort by (New-Old)</option>
                       <option value="name">Sort by Name (A-Z)</option>
                       <option value="id">Sort by ID</option>
                       <option value="position">Sort by Position</option>
